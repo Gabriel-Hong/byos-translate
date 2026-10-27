@@ -8,8 +8,12 @@
 // button, which is the same activeTab path a user takes; Chrome then starts the
 // bridge through native messaging.
 //
+// With --interactive the automated steps are skipped and the window stays open
+// for manual testing until it is closed; the temporary profile is then deleted.
+//
 // Usage: npm run install-host   (once)
 //        npm run e2e:chrome [-- <page-url>]
+//        npm run try:chrome [-- <page-url>]   (same as --interactive)
 import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
@@ -76,8 +80,10 @@ if (!chromePath) {
   process.exit(1);
 }
 
+const args = process.argv.slice(2);
+const interactive = args.includes("--interactive");
 let fixtureServer;
-let pageUrl = process.argv[2];
+let pageUrl = args.find((arg) => !arg.startsWith("--"));
 if (!pageUrl) {
   const html = readFileSync(FIXTURE);
   fixtureServer = createServer((req, res) => {
@@ -101,6 +107,9 @@ const child = spawn(chromePath, [
   "--window-size=1200,950",
   "about:blank",
 ], { stdio: ["ignore", "ignore", "ignore", "pipe", "pipe"] });
+const exited = new Promise((resolve) => child.once("exit", resolve));
+// Writing to the pipe after the window is closed must not crash the script.
+child.stdio[3].on("error", () => {});
 const send = connect(child);
 
 async function evaluate(sessionId, expression) {
@@ -163,20 +172,8 @@ async function pressPopupToggle(extensionId, expectedLabel) {
   if (popupError) throw new Error(`popup reported: ${popupError}`);
 }
 
-let failed = false;
-try {
-  console.log(`browser: ${(await send("Browser.getVersion")).product}`);
-  const { id: extensionId } = await send("Extensions.loadUnpacked", { path: EXTENSION_DIR });
-  // The bridge registration allows only the ID derived from the manifest key.
-  if (extensionId !== expectedExtensionId) {
-    throw new Error(`extension ID ${extensionId} differs from the manifest key's ${expectedExtensionId}`);
-  }
-  await findTarget(
-    (target) => target.type === "service_worker" && target.url.startsWith(`chrome-extension://${extensionId}/`),
-    "extension service worker",
-  );
-
-  const { targetId } = await send("Target.createTarget", { url: pageUrl });
+// Translates the page, scrolls, and switches translation off again.
+async function runScenario(extensionId, targetId) {
   const page = await attach(targetId);
   // A new tab starts on about:blank, which is also "complete"; wait for the real
   // document, because navigating away revokes the activeTab grant.
@@ -217,13 +214,39 @@ try {
   if (first.error > 0 || scrolled.error > 0) throw new Error("some blocks failed to translate");
   if (first.duplicates > 0 || scrolled.duplicates > 0) throw new Error("some translations repeat their source");
   console.log("PASS");
+}
+
+let failed = false;
+try {
+  console.log(`browser: ${(await send("Browser.getVersion")).product}`);
+  const { id: extensionId } = await send("Extensions.loadUnpacked", { path: EXTENSION_DIR });
+  // The bridge registration allows only the ID derived from the manifest key.
+  if (extensionId !== expectedExtensionId) {
+    throw new Error(`extension ID ${extensionId} differs from the manifest key's ${expectedExtensionId}`);
+  }
+  await findTarget(
+    (target) => target.type === "service_worker" && target.url.startsWith(`chrome-extension://${extensionId}/`),
+    "extension service worker",
+  );
+  const { targetId } = await send("Target.createTarget", { url: pageUrl });
+
+  if (interactive) {
+    console.log(`Chrome is open with BYOS Translate on ${pageUrl}`);
+    console.log("Use Alt+Q, the puzzle-piece menu, or right-click > BYOS Translate 켜기/끄기.");
+    console.log("Close the Chrome window (or press Ctrl+C here) to finish; the temporary profile is then deleted.");
+    await Promise.race([exited, new Promise((resolve) => process.once("SIGINT", resolve))]);
+  } else {
+    await runScenario(extensionId, targetId);
+  }
 } catch (error) {
   failed = true;
   console.error(`FAIL: ${error.message}`);
 } finally {
-  await send("Browser.close").catch(() => {});
-  await Promise.race([new Promise((resolve) => child.once("exit", resolve)), sleep(5000)]);
-  child.kill();
+  if (child.exitCode === null) {
+    await Promise.race([send("Browser.close").catch(() => {}), sleep(3000)]);
+    await Promise.race([exited, sleep(5000)]);
+    child.kill();
+  }
   fixtureServer?.close();
   rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 }

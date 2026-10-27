@@ -16,6 +16,7 @@
     "install-host": "node scripts/install-host.mjs",
     "uninstall-host": "node scripts/install-host.mjs --uninstall",
     "test": "node --test \"test/*.test.mjs\"",
-    "e2e:chrome": "node scripts/e2e-chrome.mjs"
+    "e2e:chrome": "node scripts/e2e-chrome.mjs",
+    "try:chrome": "node scripts/e2e-chrome.mjs --interactive"
   }
 }

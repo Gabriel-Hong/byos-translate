@@ -80,6 +80,7 @@ Windows 11, Claude Code 2.1.310, Haiku에서 측정:
 ```sh
 npm test             # 가짜 claude를 쓰는 단위·통합 테스트
 npm run e2e:chrome   # 설치된 Chrome으로 실제 번역 E2E, npm run install-host 필요
+npm run try:chrome   # 확장을 넣은 임시 프로필 Chrome을 열어 직접 테스트
 ```
 
 ## 라이선스
