@@ -53,8 +53,8 @@ Optional settings (`config.json`) and the bridge log (`native-host.log`) are in 
 
 - Press **Alt+Q**, use the toolbar popup, or right-click → **BYOS Translate 켜기/끄기**. Repeat to remove the
   translations.
-- Pick the engine (Claude, OpenAI or Google), model and target language in the popup. Leave the model empty
-  for the provider's default.
+- Pick the engine (Claude, OpenAI or Google), model and target language in the popup. Claude's choices always
+  point to the newest model of each family; "직접 입력…" takes any other model name.
 - The UI is in Korean for now.
 
 ## Performance

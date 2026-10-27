@@ -15,9 +15,9 @@
       <label>엔진
         <select id="provider"></select>
       </label>
-      <label>모델 <small>(비우면 기본 모델)</small>
-        <input id="model" list="modelSuggestions" autocomplete="off" spellcheck="false">
-        <datalist id="modelSuggestions"></datalist>
+      <label>모델
+        <select id="model"></select>
+        <input id="customModel" type="text" placeholder="모델 이름" autocomplete="off" spellcheck="false" hidden>
       </label>
       <button id="check" type="button">연결 테스트</button>
       <span id="checkResult" class="status"></span>

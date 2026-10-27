@@ -26,7 +26,7 @@ async function init() {
     $("checkResult").textContent = result.message;
     $("checkResult").className = `status ${result.ok ? "ok" : "bad"}`;
   };
-  bindModelPicker({ provider: $("provider"), model: $("model"), suggestions: $("modelSuggestions") }, settings, check);
+  bindModelPicker({ provider: $("provider"), model: $("model"), customModel: $("customModel") }, settings, check);
   $("check").addEventListener("click", check);
 
   $("form").addEventListener("submit", async (event) => {

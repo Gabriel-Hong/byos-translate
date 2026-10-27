@@ -31,7 +31,7 @@ async function init() {
   const settings = await loadSettings();
   fillLanguages($("targetLang"), settings.targetLang);
   bindModelPicker(
-    { provider: $("provider"), model: $("model"), suggestions: $("modelSuggestions") },
+    { provider: $("provider"), model: $("model"), customModel: $("customModel") },
     settings,
     showBridgeStatus,
   );

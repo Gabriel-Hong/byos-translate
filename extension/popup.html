@@ -17,8 +17,8 @@
     <select id="provider"></select>
   </label>
   <label>모델
-    <input id="model" list="modelSuggestions" autocomplete="off" spellcheck="false">
-    <datalist id="modelSuggestions"></datalist>
+    <select id="model"></select>
+    <input id="customModel" type="text" placeholder="모델 이름" autocomplete="off" spellcheck="false" hidden>
   </label>
   <p class="hint">단축키 <kbd>Alt+Q</kbd> · <a href="#" id="openOptions">옵션</a></p>
   <script type="module" src="popup.js"></script>
