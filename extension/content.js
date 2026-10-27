@@ -132,6 +132,11 @@
     translated.delete(record);
   }
 
+  function sameText(a, b) {
+    const normalize = (text) => text.replace(/\s+/g, " ").trim();
+    return normalize(a) === normalize(b);
+  }
+
   function translatable({ text, prose }) {
     return text.length >= 2 && prose >= 2 && !alreadyInTarget(text);
   }
@@ -222,7 +227,12 @@
     batch.forEach((record, index) => {
       if (records.get(record.container) !== record) return;
       const translation = response?.translations?.[index];
-      if (translation) {
+      if (translation && sameText(translation, record.sendText)) {
+        // Code, names and token fragments come back unchanged; showing them
+        // again would only duplicate the source.
+        removeTranslation(record);
+        record.state = "same";
+      } else if (translation) {
         render(record, "done", translation);
       } else {
         render(record, "error", "⚠ 번역 실패 · 클릭해서 다시 시도", response?.error ?? "알 수 없는 오류");

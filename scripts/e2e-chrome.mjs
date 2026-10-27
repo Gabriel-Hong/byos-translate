@@ -128,10 +128,15 @@ async function attach(targetId) {
   return (await send("Target.attachToTarget", { targetId, flatten: true })).sessionId;
 }
 
+// `duplicates` counts translations identical to their source block, which
+// should be hidden rather than shown twice.
 const STATE = `(() => {
   const nodes = [...document.querySelectorAll("byos-tr")];
   const count = (name) => nodes.filter((node) => node.classList.contains(name)).length;
-  return { total: nodes.length, loading: count("byos-loading"), done: count("byos-done"), error: count("byos-error") };
+  const normalize = (text) => text.replace(/\\s+/g, " ").trim();
+  const duplicates = nodes.filter((node) => node.classList.contains("byos-done") && normalize(node.textContent) ===
+    normalize([...node.parentElement.childNodes].filter((child) => child !== node).map((child) => child.textContent).join(""))).length;
+  return { total: nodes.length, loading: count("byos-loading"), done: count("byos-done"), error: count("byos-error"), duplicates };
 })()`;
 
 // Opens the popup through the toolbar action and presses its toggle button.
@@ -219,6 +224,7 @@ try {
   console.log("toggle off: all translations removed");
 
   if (first.error > 0 || scrolled.error > 0) throw new Error("some blocks failed to translate");
+  if (first.duplicates > 0 || scrolled.duplicates > 0) throw new Error("some translations repeat their source");
   console.log("PASS");
 } catch (error) {
   failed = true;
