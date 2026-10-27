@@ -10,12 +10,7 @@
   <form id="form">
     <fieldset>
       <legend>로컬 브리지</legend>
-      <label>브리지 URL
-        <input id="bridgeUrl" type="url" required>
-      </label>
-      <label>브리지 토큰 <small>(<code>npm run token</code> 출력값)</small>
-        <input id="token" type="password" autocomplete="off" spellcheck="false">
-      </label>
+      <p class="hint">처음 한 번 repo 폴더에서 <code>npm run install-host</code>를 실행하세요.</p>
       <button id="check" type="button">연결 테스트</button>
       <span id="checkResult" class="status"></span>
     </fieldset>

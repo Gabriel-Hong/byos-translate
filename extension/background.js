@@ -1,9 +1,13 @@
 import { buildSystemPrompt, buildUserPrompt, parseBatchResponse } from "./protocol.js";
-import { loadSettings, pageSettings } from "./settings.js";
+import { loadSettings, OBSOLETE_SETTINGS } from "./settings.js";
 
 const CACHE_LIMIT = 3000;
 const MAX_PARALLEL_REQUESTS = 3;
 const MENU_ID = "byos-toggle";
+// Must match HOST_NAME in bridge/native-host.mjs.
+const HOST_NAME = "io.github.byos_translate";
+// Closing the idle port lets the bridge and its Claude Code processes exit.
+const HOST_IDLE_MS = 10 * 60_000;
 
 class BridgeError extends Error {}
 
@@ -42,40 +46,78 @@ async function withSlot(task) {
   }
 }
 
-async function bridgeFetch(settings, path, init = {}) {
-  if (!settings.token) {
-    throw new BridgeError("브리지 토큰이 없습니다. 확장 옵션에 'npm run token' 출력값을 입력하세요.");
+// The browser starts the bridge (native messaging host) on the first connect
+// and stops it when the port closes. One port carries every request.
+let port = null;
+let nextRequestId = 1;
+let idleTimer = null;
+const pendingRequests = new Map();
+
+function hostErrorMessage(detail) {
+  if (/not found/i.test(detail)) {
+    return "브리지가 설치되지 않았습니다. repo 폴더에서 'npm run install-host'를 실행하세요.";
   }
-  let response;
-  try {
-    response = await fetch(new URL(path, settings.bridgeUrl), {
-      ...init,
-      headers: { "x-api-key": settings.token, "anthropic-version": "2023-06-01", ...init.headers },
-    });
-  } catch {
-    throw new BridgeError(`브리지(${settings.bridgeUrl})에 연결할 수 없습니다. 'npm run bridge'로 실행했는지 확인하세요.`);
+  if (/forbidden/i.test(detail)) {
+    return "이 확장이 브리지에 등록되지 않았습니다. 'npm run install-host'를 다시 실행하세요.";
   }
-  const body = await response.json().catch(() => null);
-  if (response.status === 401) {
-    throw new BridgeError("브리지 토큰이 맞지 않습니다. 'npm run token' 값으로 옵션을 갱신하세요.");
-  }
-  if (!response.ok) {
-    throw new BridgeError(`브리지 오류 ${response.status}: ${body?.error?.message ?? response.statusText}`);
-  }
-  return body;
+  return `브리지와 통신하지 못했습니다(${detail}). 데이터 폴더의 native-host.log를 확인하세요.`;
+}
+
+function hostPort() {
+  if (port) return port;
+  const opened = chrome.runtime.connectNative(HOST_NAME);
+  opened.onMessage.addListener((message) => {
+    const request = pendingRequests.get(message?.id);
+    if (!request) return;
+    pendingRequests.delete(message.id);
+    request.resolve(message);
+    scheduleIdleDisconnect();
+  });
+  opened.onDisconnect.addListener(() => {
+    const error = new BridgeError(hostErrorMessage(chrome.runtime.lastError?.message ?? "연결이 끊겼습니다"));
+    if (port === opened) port = null;
+    clearTimeout(idleTimer);
+    for (const request of pendingRequests.values()) request.reject(error);
+    pendingRequests.clear();
+  });
+  port = opened;
+  return port;
+}
+
+function scheduleIdleDisconnect() {
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => {
+    if (pendingRequests.size > 0 || !port) return;
+    port.disconnect();
+    port = null;
+  }, HOST_IDLE_MS);
+}
+
+async function callHost(message) {
+  const reply = await new Promise((resolve, reject) => {
+    const id = nextRequestId++;
+    pendingRequests.set(id, { resolve, reject });
+    clearTimeout(idleTimer);
+    try {
+      hostPort().postMessage({ id, ...message });
+    } catch (error) {
+      pendingRequests.delete(id);
+      reject(new BridgeError(hostErrorMessage(String(error?.message ?? error))));
+    }
+  });
+  if (!reply.ok) throw new BridgeError(`브리지 오류: ${reply.error?.message ?? "알 수 없는 오류"}`);
+  return reply.result;
 }
 
 async function translateBatch(settings, texts, pageTitle) {
   const body = await withSlot(() =>
-    bridgeFetch(settings, "/v1/messages", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
+    callHost({
+      type: "messages",
+      body: {
         model: settings.model,
-        max_tokens: 8192,
         system: buildSystemPrompt(settings.targetLang),
         messages: [{ role: "user", content: buildUserPrompt(texts, { pageTitle }) }],
-      }),
+      },
     }),
   );
   const reply = body?.content?.find?.((block) => block.type === "text")?.text ?? "";
@@ -118,10 +160,16 @@ async function translateTexts(texts, pageTitle) {
   return { translations: results, error: error ? String(error.message ?? error) : null };
 }
 
+// Reports the bridge state and starts Claude Code for the current settings, so
+// a translation started from the popup does not wait for it to boot.
 async function checkBridge() {
   const settings = await loadSettings();
   try {
-    const status = await bridgeFetch(settings, "/v1/bridge/status");
+    const status = await callHost({
+      type: "warmup",
+      model: settings.model,
+      system: buildSystemPrompt(settings.targetLang),
+    });
     return { ok: true, message: `연결됨 · 대기 프로세스 ${status.runner.idle}개`, runner: status.runner };
   } catch (error) {
     return { ok: false, message: error.message };
@@ -145,6 +193,7 @@ async function toggleTab(tabId) {
 }
 
 chrome.runtime.onInstalled.addListener(() => {
+  chrome.storage.local.remove(OBSOLETE_SETTINGS);
   chrome.contextMenus.create({
     id: MENU_ID,
     title: "BYOS Translate 켜기/끄기",
@@ -164,7 +213,7 @@ chrome.storage.onChanged.addListener(async (changes, area) => {
   if (area !== "local") return;
   const relevant = ["model", "targetLang", "displayStyle", "maxSegmentsPerRequest", "maxCharsPerRequest"];
   if (!relevant.some((key) => key in changes)) return;
-  const settings = pageSettings(await loadSettings());
+  const settings = await loadSettings();
   for (const tab of await chrome.tabs.query({})) {
     if (tab.id !== undefined) sendToTab(tab.id, { type: "byos:settings-changed", settings }).catch(() => {});
   }
@@ -174,7 +223,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const handle = async () => {
     switch (message?.type) {
       case "byos:settings":
-        return pageSettings(await loadSettings());
+        return loadSettings();
       case "byos:translate":
         return translateTexts(message.texts, message.pageTitle);
       case "byos:check":

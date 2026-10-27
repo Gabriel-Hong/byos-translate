@@ -222,6 +222,11 @@ export class ClaudeRunner {
     }
   }
 
+  // Starts processes for an upcoming request so it does not wait for Claude Code to boot.
+  warm({ model, system }) {
+    if (!this.#closed) this.#replenish(model, system, processKey(model, system));
+  }
+
   async close() {
     this.#closed = true;
     for (const waiter of this.#waiters.splice(0)) {

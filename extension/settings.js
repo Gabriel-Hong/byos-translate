@@ -1,12 +1,13 @@
 export const DEFAULT_SETTINGS = {
-  bridgeUrl: "http://127.0.0.1:18765",
-  token: "",
   model: "haiku",
   targetLang: "ko",
   displayStyle: "dashed",
   maxSegmentsPerRequest: 8,
   maxCharsPerRequest: 3000,
 };
+
+// Settings of the HTTP bridge used before native messaging.
+export const OBSOLETE_SETTINGS = ["bridgeUrl", "token"];
 
 export const DISPLAY_STYLES = {
   dashed: "점선 밑줄",
@@ -17,15 +18,4 @@ export const DISPLAY_STYLES = {
 
 export async function loadSettings() {
   return chrome.storage.local.get(DEFAULT_SETTINGS);
-}
-
-// Settings a content script needs; the bridge token never leaves the worker.
-export function pageSettings(settings) {
-  return {
-    model: settings.model,
-    targetLang: settings.targetLang,
-    displayStyle: settings.displayStyle,
-    maxSegmentsPerRequest: settings.maxSegmentsPerRequest,
-    maxCharsPerRequest: settings.maxCharsPerRequest,
-  };
 }

@@ -4,8 +4,14 @@
   "version": "0.1.0",
   "description": "Bilingual web page translation through your local Claude Code (bring your own subscription).",
   "minimum_chrome_version": "116",
-  "permissions": ["storage", "activeTab", "scripting", "contextMenus"],
-  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzI8rpVfOQcVjSak0vWW/XAe6r4luOoDUMiSs/t8aplJOeTdZlVqqmfIrl3n3i2k2koREVXdZrttbJnasW0OZj0qwAHBpo5oy4MkHvxLBQA9kgqVuy+aA1BgSdD/lkgmNgK3BGOiQi+P0/to3zC+YcU/1obg5EXb7j6s4ccJFi/UEFc1R9/0oFIuUnH3RPaqsju0UdT5KoS6iakX1Qe/A623y7F3eN0Jq7kwRNRD7sYM+fmEaQFMmysdbFxxT37eAVlu/xZEhap0qo+stQzLYklOHTr8Ut3c1pvYz8+oLzIAcTlBYpDQq5JHU8He9HVFWOnZSHNWtZMePXFFZVFBWWQIDAQAB",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "contextMenus",
+    "nativeMessaging"
+  ],
   "background": {
     "service_worker": "background.js",
     "type": "module"

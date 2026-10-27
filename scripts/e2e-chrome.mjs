@@ -1,13 +1,14 @@
 #!/usr/bin/env node
-// End-to-end check in the installed Google Chrome against the running bridge.
+// End-to-end check in the installed Google Chrome with the installed bridge.
 //
 // Branded Chrome ignores --load-extension since 137, so the unmodified
 // extension is installed with CDP Extensions.loadUnpacked over
 // --remote-debugging-pipe in a throwaway profile. Translation is started by
 // invoking the toolbar action (Extensions.triggerAction) and pressing the popup
-// button, which is the same activeTab path a user takes.
+// button, which is the same activeTab path a user takes; Chrome then starts the
+// bridge through native messaging.
 //
-// Usage: npm run bridge   (in another terminal)
+// Usage: npm run install-host   (once)
 //        npm run e2e:chrome [-- <page-url>]
 import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -15,7 +16,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadConfig } from "../bridge/config.mjs";
+import { extensionIdFromKey } from "./install-host.mjs";
 
 const EXTENSION_DIR = fileURLToPath(new URL("../extension/", import.meta.url));
 const FIXTURE = fileURLToPath(new URL("../test/fixtures/article.html", import.meta.url));
@@ -66,14 +67,9 @@ function connect(child) {
   };
 }
 
-const config = loadConfig();
-const bridgeUrl = `http://127.0.0.1:${config.port}`;
-try {
-  await fetch(`${bridgeUrl}/health`);
-} catch {
-  console.error(`The bridge is not reachable at ${bridgeUrl}. Start it with 'npm run bridge' first.`);
-  process.exit(1);
-}
+const expectedExtensionId = extensionIdFromKey(
+  JSON.parse(readFileSync(join(EXTENSION_DIR, "manifest.json"), "utf8")).key,
+);
 const chromePath = CHROME_CANDIDATES.find((candidate) => candidate && existsSync(candidate));
 if (!chromePath) {
   console.error("Google Chrome was not found. Set CHROME_PATH.");
@@ -88,13 +84,10 @@ if (!pageUrl) {
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     res.end(html);
   });
-  // 127.0.0.2 is outside the manifest's 127.0.0.1/localhost host permissions,
-  // so the page is reachable only through the activeTab grant.
-  await new Promise((resolve, reject) => {
-    fixtureServer.once("error", reject);
-    fixtureServer.listen(0, "127.0.0.2", resolve);
-  });
-  pageUrl = `http://127.0.0.2:${fixtureServer.address().port}/article.html`;
+  // The manifest has no host permissions, so the page is reachable only
+  // through the activeTab grant.
+  await new Promise((resolve) => fixtureServer.listen(0, "127.0.0.1", resolve));
+  pageUrl = `http://127.0.0.1:${fixtureServer.address().port}/article.html`;
 }
 
 const profile = mkdtempSync(join(tmpdir(), "byos-e2e-chrome-"));
@@ -174,15 +167,13 @@ let failed = false;
 try {
   console.log(`browser: ${(await send("Browser.getVersion")).product}`);
   const { id: extensionId } = await send("Extensions.loadUnpacked", { path: EXTENSION_DIR });
-  const worker = await findTarget(
+  // The bridge registration allows only the ID derived from the manifest key.
+  if (extensionId !== expectedExtensionId) {
+    throw new Error(`extension ID ${extensionId} differs from the manifest key's ${expectedExtensionId}`);
+  }
+  await findTarget(
     (target) => target.type === "service_worker" && target.url.startsWith(`chrome-extension://${extensionId}/`),
     "extension service worker",
-  );
-  const workerSession = await attach(worker.targetId);
-  await send(
-    "Extensions.setStorageItems",
-    { id: extensionId, storageArea: "local", values: { bridgeUrl, token: config.token } },
-    workerSession,
   );
 
   const { targetId } = await send("Target.createTarget", { url: pageUrl });

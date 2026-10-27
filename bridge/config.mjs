@@ -1,14 +1,10 @@
-import { randomBytes } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
 const APP_DIR = "byos-translate";
-const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
 
 export const DEFAULT_CONFIG = Object.freeze({
-  host: "127.0.0.1",
-  port: 18765,
   defaultModel: "haiku",
   claudeCommand: "claude",
   maxConcurrent: 4,
@@ -29,40 +25,33 @@ export function defaultDataDir() {
   return join(process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), APP_DIR);
 }
 
-// Reads config.json, adding a token on first run. Existing fields are never
-// rewritten, and a malformed file is reported instead of being replaced.
-export function loadConfig(dataDir = defaultDataDir()) {
-  mkdirSync(dataDir, { recursive: true });
-  const file = join(dataDir, "config.json");
-  let stored = {};
+function readStored(file) {
+  let stored;
   try {
     stored = JSON.parse(readFileSync(file, "utf8"));
   } catch (error) {
-    if (error.code !== "ENOENT") {
-      throw new Error(`Cannot read ${file}: ${error.message}. Fix or remove the file and retry.`);
-    }
+    if (error.code === "ENOENT") return {};
+    throw new Error(`Cannot read ${file}: ${error.message}. Fix or remove the file and retry.`);
   }
   if (stored === null || typeof stored !== "object" || Array.isArray(stored)) {
     throw new Error(`${file} must contain a JSON object.`);
   }
-  if (typeof stored.token !== "string" || stored.token.length < 16) {
-    stored = { ...stored, token: randomBytes(24).toString("base64url") };
-    const temp = `${file}.${process.pid}.tmp`;
-    writeFileSync(temp, `${JSON.stringify(stored, null, 2)}\n`, { mode: 0o600 });
-    renameSync(temp, file);
+  return stored;
+}
+
+// config.json holds optional overrides of DEFAULT_CONFIG; unknown keys are ignored.
+export function loadConfig(dataDir = defaultDataDir()) {
+  const configFile = join(dataDir, "config.json");
+  const stored = readStored(configFile);
+  const config = { ...DEFAULT_CONFIG };
+  for (const key of Object.keys(DEFAULT_CONFIG)) {
+    if (stored[key] !== undefined) config[key] = stored[key];
   }
-  const config = { ...DEFAULT_CONFIG, ...stored, dataDir, configFile: file };
   validateConfig(config);
-  return config;
+  return { ...config, dataDir, configFile };
 }
 
 export function validateConfig(config) {
-  if (!LOOPBACK_HOSTS.has(config.host)) {
-    throw new Error(`host must be a loopback address (127.0.0.1, ::1, localhost), got ${config.host}`);
-  }
-  if (!Number.isInteger(config.port) || config.port < 0 || config.port > 65535) {
-    throw new Error(`port must be an integer between 0 and 65535, got ${config.port}`);
-  }
   for (const key of ["maxConcurrent", "warmPerKey", "maxIdleProcesses", "idleTtlMs", "requestTimeoutMs"]) {
     const value = config[key];
     const min = key === "maxConcurrent" ? 1 : 0;
@@ -70,7 +59,9 @@ export function validateConfig(config) {
       throw new Error(`${key} must be an integer >= ${min}, got ${value}`);
     }
   }
-  if (typeof config.claudeCommand !== "string" || config.claudeCommand.length === 0) {
-    throw new Error("claudeCommand must be a non-empty string");
+  for (const key of ["claudeCommand", "defaultModel"]) {
+    if (typeof config[key] !== "string" || config[key].length === 0) {
+      throw new Error(`${key} must be a non-empty string`);
+    }
   }
 }

@@ -1,8 +1,9 @@
-// Anthropic Messages API request parsing and response formatting.
+// Parsing of the extension's requests (an Anthropic Messages body) and the
+// matching response shape.
 //
 // Claude Code accepts one user turn per process and has no sampling flags, so
-// the bridge accepts exactly one user message and ignores sampling fields such
-// as max_tokens, temperature and thinking.
+// exactly one user message is accepted and sampling fields such as max_tokens,
+// temperature and thinking are ignored.
 import { randomUUID } from "node:crypto";
 
 const MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._\-[\]]{0,99}$/;
@@ -10,14 +11,8 @@ const MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._\-[\]]{0,99}$/;
 export const MAX_SYSTEM_CHARS = 20_000;
 export const MAX_PROMPT_CHARS = 400_000;
 
-export const BRIDGE_MODELS = [
-  { id: "haiku", display_name: "Claude Haiku (latest, via Claude Code)" },
-  { id: "sonnet", display_name: "Claude Sonnet (latest, via Claude Code)" },
-  { id: "opus", display_name: "Claude Opus (latest, via Claude Code)" },
-];
-
 function invalid(message) {
-  return { ok: false, error: { status: 400, type: "invalid_request_error", message } };
+  return { ok: false, error: { type: "invalid_request_error", message } };
 }
 
 function isObject(value) {
@@ -37,24 +32,29 @@ function textContent(content) {
   return parts.join("\n\n");
 }
 
+// Model and system prompt select a Claude Code process, for requests and warm-ups alike.
+export function parseProcessKey({ model, system }, { defaultModel }) {
+  const chosen = model ?? defaultModel;
+  if (typeof chosen !== "string" || !MODEL_PATTERN.test(chosen)) {
+    return invalid("model must be a Claude model name or alias such as haiku, sonnet or claude-haiku-4-5.");
+  }
+  let text = "";
+  if (system !== undefined && system !== null) {
+    text = textContent(system);
+    if (text === null) return invalid("system must be a string or an array of text blocks.");
+  }
+  if (text.length > MAX_SYSTEM_CHARS) {
+    return invalid(`system must be at most ${MAX_SYSTEM_CHARS} characters.`);
+  }
+  return { ok: true, value: { model: chosen, system: text } };
+}
+
 export function parseMessagesRequest(body, { defaultModel }) {
   if (!isObject(body)) return invalid("Request body must be a JSON object.");
   if (body.stream === true) return invalid("stream=true is not supported by this bridge.");
 
-  const model = body.model ?? defaultModel;
-  if (typeof model !== "string" || !MODEL_PATTERN.test(model)) {
-    return invalid("model must be a Claude model name or alias such as haiku, sonnet or claude-haiku-4-5.");
-  }
-
-  let system = "";
-  if (body.system !== undefined && body.system !== null) {
-    const text = textContent(body.system);
-    if (text === null) return invalid("system must be a string or an array of text blocks.");
-    system = text;
-  }
-  if (system.length > MAX_SYSTEM_CHARS) {
-    return invalid(`system must be at most ${MAX_SYSTEM_CHARS} characters.`);
-  }
+  const key = parseProcessKey(body, { defaultModel });
+  if (!key.ok) return key;
 
   if (!Array.isArray(body.messages) || body.messages.length !== 1) {
     return invalid("messages must contain exactly one user message.");
@@ -70,7 +70,7 @@ export function parseMessagesRequest(body, { defaultModel }) {
     return invalid(`messages[0].content must be at most ${MAX_PROMPT_CHARS} characters.`);
   }
 
-  return { ok: true, value: { model, system, prompt } };
+  return { ok: true, value: { ...key.value, prompt } };
 }
 
 export function messageResponse(completion) {
@@ -92,27 +92,18 @@ export function messageResponse(completion) {
   };
 }
 
-export function errorBody(type, message) {
-  return { type: "error", error: { type, message } };
-}
-
-// Maps a RunnerError to an HTTP status and Anthropic error type. Upstream login
-// problems are reported as 502 so clients do not blame the bridge token.
-export function runnerErrorResponse(error) {
+// Maps a RunnerError to an Anthropic error type.
+export function runnerErrorType(error) {
   switch (error.kind) {
     case "busy":
-      return { status: 429, type: "rate_limit_error" };
-    case "timeout":
-      return { status: 504, type: "api_error" };
-    case "aborted":
-      return { status: 499, type: "api_error" };
+      return "rate_limit_error";
     case "closed":
-      return { status: 503, type: "overloaded_error" };
+      return "overloaded_error";
     case "upstream":
-      if (error.status === 429) return { status: 429, type: "rate_limit_error" };
-      if (error.status === 529 || error.status === 503) return { status: 529, type: "overloaded_error" };
-      return { status: 502, type: "api_error" };
+      if (error.status === 429) return "rate_limit_error";
+      if (error.status === 529 || error.status === 503) return "overloaded_error";
+      return "api_error";
     default:
-      return { status: 502, type: "api_error" };
+      return "api_error";
   }
 }
