@@ -1,0 +1,21 @@
+{
+  "name": "byos-translate",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Bring your own subscription: bilingual web page translation for Chrome/Edge through your local Claude Code",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Gabriel-Hong/byos-translate.git"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "bridge": "node bridge/main.mjs",
+    "token": "node bridge/main.mjs --print-token",
+    "test": "node --test \"test/*.test.mjs\"",
+    "e2e:chrome": "node scripts/e2e-chrome.mjs"
+  }
+}

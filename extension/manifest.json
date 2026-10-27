@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "BYOS Translate",
+  "version": "0.1.0",
+  "description": "Bilingual web page translation through your local Claude Code (bring your own subscription).",
+  "minimum_chrome_version": "116",
+  "permissions": ["storage", "activeTab", "scripting", "contextMenus"],
+  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "BYOS Translate",
+    "default_popup": "popup.html"
+  },
+  "options_page": "options.html",
+  "commands": {
+    "toggle-translation": {
+      "suggested_key": {
+        "default": "Alt+Q"
+      },
+      "description": "현재 페이지 번역 켜기/끄기"
+    }
+  }
+}

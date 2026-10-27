@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>BYOS Translate 옵션</title>
+  <link rel="stylesheet" href="ui.css">
+</head>
+<body class="options">
+  <h1>BYOS Translate 옵션</h1>
+  <form id="form">
+    <fieldset>
+      <legend>로컬 브리지</legend>
+      <label>브리지 URL
+        <input id="bridgeUrl" type="url" required>
+      </label>
+      <label>브리지 토큰 <small>(<code>npm run token</code> 출력값)</small>
+        <input id="token" type="password" autocomplete="off" spellcheck="false">
+      </label>
+      <button id="check" type="button">연결 테스트</button>
+      <span id="checkResult" class="status"></span>
+    </fieldset>
+    <fieldset>
+      <legend>번역</legend>
+      <label>번역할 언어
+        <select id="targetLang"></select>
+      </label>
+      <label>모델 <small>(haiku, sonnet, opus 또는 전체 모델 이름)</small>
+        <input id="model" type="text" required pattern="[A-Za-z0-9][A-Za-z0-9._\-\[\]]*">
+      </label>
+      <label>표시 방식
+        <select id="displayStyle"></select>
+      </label>
+      <label>요청당 최대 문단 수
+        <input id="maxSegmentsPerRequest" type="number" min="1" max="40" required>
+      </label>
+      <label>요청당 최대 글자 수
+        <input id="maxCharsPerRequest" type="number" min="200" max="20000" step="100" required>
+      </label>
+    </fieldset>
+    <button type="submit" class="primary">저장</button>
+    <span id="saved" class="status"></span>
+  </form>
+  <script type="module" src="options.js"></script>
+</body>
+</html>

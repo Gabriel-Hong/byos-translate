@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>BYOS Translate</title>
+  <link rel="stylesheet" href="ui.css">
+</head>
+<body class="popup">
+  <h1>BYOS Translate</h1>
+  <p id="bridge" class="status">브리지 확인 중…</p>
+  <button id="toggle" type="button" class="primary">이 페이지 번역</button>
+  <p id="pageError" class="error" hidden></p>
+  <label>번역할 언어
+    <select id="targetLang"></select>
+  </label>
+  <label>모델
+    <select id="model">
+      <option value="haiku">Haiku (빠름)</option>
+      <option value="sonnet">Sonnet</option>
+      <option value="opus">Opus</option>
+    </select>
+  </label>
+  <p class="hint">단축키 <kbd>Alt+Q</kbd> · <a href="#" id="openOptions">옵션</a></p>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
