@@ -4,8 +4,12 @@ import { loadSettings, OBSOLETE_SETTINGS, PROVIDERS, translationKey } from "./se
 const CACHE_LIMIT = 3000;
 const MAX_PARALLEL_REQUESTS = 3;
 const MENU_ID = "byos-toggle";
-// Must match HOST_NAME in bridge/native-host.mjs.
+// Must match HOST_NAME and PROTOCOL_VERSION in bridge/native-host.mjs.
 const HOST_NAME = "io.github.byos_translate";
+const PROTOCOL_VERSION = 2;
+const VERSION_MISMATCH =
+  "브리지와 확장의 버전이 다릅니다. chrome://extensions에서 BYOS Translate를 새로 고치거나 브라우저를 다시 시작하세요. " +
+  "repo 폴더를 옮겼거나 여러 개라면 'npm run install-host'도 다시 실행하세요.";
 // Closing the idle port lets the bridge and its provider processes exit.
 const HOST_IDLE_MS = 10 * 60_000;
 
@@ -93,18 +97,35 @@ function scheduleIdleDisconnect() {
   }, HOST_IDLE_MS);
 }
 
+// Closes the port so the next request starts the bridge registered now.
+// disconnect() does not fire onDisconnect on this side, so pending requests
+// are rejected here.
+function dropPort(error) {
+  clearTimeout(idleTimer);
+  for (const request of pendingRequests.values()) request.reject(error);
+  pendingRequests.clear();
+  port?.disconnect();
+  port = null;
+}
+
 async function callHost(message) {
   const reply = await new Promise((resolve, reject) => {
     const id = nextRequestId++;
     pendingRequests.set(id, { resolve, reject });
     clearTimeout(idleTimer);
     try {
-      hostPort().postMessage({ id, ...message });
+      hostPort().postMessage({ id, protocol: PROTOCOL_VERSION, ...message });
     } catch (error) {
       pendingRequests.delete(id);
       reject(new BridgeError(hostErrorMessage(String(error?.message ?? error))));
     }
   });
+  // Bridges before protocol 2 do not state a version.
+  if (reply.protocol !== PROTOCOL_VERSION || reply.error?.type === "version_mismatch") {
+    const error = new BridgeError(VERSION_MISMATCH);
+    dropPort(error);
+    throw error;
+  }
   if (!reply.ok) throw new BridgeError(`브리지 오류: ${reply.error?.message ?? "알 수 없는 오류"}`);
   return reply.result;
 }

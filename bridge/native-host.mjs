@@ -2,10 +2,14 @@
 // and closes stdin when the extension disconnects or the browser exits.
 // Every message is a 4-byte little-endian length followed by UTF-8 JSON.
 //
-// Requests:  { id, type: "messages", body }                  Anthropic Messages body plus provider
-//            { id, type: "warmup", provider, model, system }  start processes ahead of use
-//            { id, type: "status" }
-// Responses: { id, ok: true, result } or { id, ok: false, error: { type, message } }
+// Requests:  { id, protocol, type: "messages", body }                  Anthropic Messages body plus provider
+//            { id, protocol, type: "warmup", provider, model, system }  start processes ahead of use
+//            { id, protocol, type: "status" }
+// Responses: { id, protocol, ok: true, result } or { id, protocol, ok: false, error: { type, message } }
+//
+// Both sides state PROTOCOL_VERSION in every message. The extension and the
+// bridge update separately (the bridge runs from disk, the extension until it
+// is reloaded), so a request from another version is refused, not guessed at.
 import { appendFileSync, mkdirSync, renameSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -16,6 +20,8 @@ import { createDriver, PROVIDER_IDS } from "./providers.mjs";
 import { resolveCommand } from "./resolve-command.mjs";
 
 export const HOST_NAME = "io.github.byos_translate";
+// 1: single-provider native messaging without the field; 2: providers.
+export const PROTOCOL_VERSION = 2;
 const MAX_INPUT_BYTES = 8 * 1024 * 1024;
 // Chrome rejects host-to-browser messages above 1 MB and closes the port.
 const MAX_OUTPUT_BYTES = 1024 * 1024;
@@ -101,15 +107,26 @@ function failure(type, message) {
 export function serveNativeHost({ input, output, providers, log = () => {} }) {
   const { defaultModels } = providers;
   const send = (id, reply) => {
-    let frame = encodeMessage({ id, ...reply });
+    let frame = encodeMessage({ id, protocol: PROTOCOL_VERSION, ...reply });
     if (frame.length - 4 > MAX_OUTPUT_BYTES) {
-      frame = encodeMessage({ id, ...failure("api_error", "The reply exceeds the 1 MB native messaging limit.") });
+      frame = encodeMessage({
+        id,
+        protocol: PROTOCOL_VERSION,
+        ...failure("api_error", "The reply exceeds the 1 MB native messaging limit."),
+      });
     }
     output.write(frame);
   };
 
   const handle = async (message) => {
     const id = message?.id ?? null;
+    if (message?.type !== "malformed" && message?.protocol !== PROTOCOL_VERSION) {
+      return send(id, failure(
+        "version_mismatch",
+        `The extension uses bridge protocol ${message?.protocol ?? 1} but this bridge uses ${PROTOCOL_VERSION}. ` +
+          "Reload the extension in chrome://extensions or restart the browser.",
+      ));
+    }
     switch (message?.type) {
       case "status":
         return send(id, { ok: true, result: { providers: providers.status() } });

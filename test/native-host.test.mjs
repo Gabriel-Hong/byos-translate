@@ -7,7 +7,14 @@ import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_CONFIG } from "../bridge/config.mjs";
-import { createDecoder, createProviders, encodeMessage, HOST_NAME, serveNativeHost } from "../bridge/native-host.mjs";
+import {
+  createDecoder,
+  createProviders,
+  encodeMessage,
+  HOST_NAME,
+  PROTOCOL_VERSION,
+  serveNativeHost,
+} from "../bridge/native-host.mjs";
 import { resolveCommand } from "../bridge/resolve-command.mjs";
 import { extensionIdFromKey, hostManifest } from "../scripts/install-host.mjs";
 
@@ -43,7 +50,7 @@ function startHost(t, runnerOptions = {}) {
     request(message) {
       const id = nextId++;
       const reply = expect(id);
-      input.write(encodeMessage({ id, ...message }));
+      input.write(encodeMessage({ id, protocol: PROTOCOL_VERSION, ...message }));
       return reply;
     },
     close() {
@@ -154,6 +161,23 @@ test("rejects requests the command-line tools cannot represent", async (t) => {
   assert.equal(host.runner.snapshot().spawned, 0);
 });
 
+test("refuses requests from another extension version and states its own", async (t) => {
+  const host = startHost(t);
+  // An extension from before protocol 2 sends no version.
+  const older = host.expect(101);
+  host.writeRaw(encodeMessage({ id: 101, type: "messages", body: messages("hi").body }));
+  const newer = host.expect(102);
+  host.writeRaw(encodeMessage({ id: 102, protocol: PROTOCOL_VERSION + 1, type: "status" }));
+  for (const reply of [await older, await newer]) {
+    assert.equal(reply.ok, false);
+    assert.equal(reply.error.type, "version_mismatch");
+    assert.match(reply.error.message, /Reload the extension/);
+    assert.equal(reply.protocol, PROTOCOL_VERSION);
+  }
+  assert.equal(host.runner.snapshot().spawned, 0);
+  assert.equal((await host.request({ type: "status" })).protocol, PROTOCOL_VERSION);
+});
+
 test("a warm-up starts Claude Code processes that serve the next request", async (t) => {
   const host = startHost(t, { warmPerKey: 1 });
   const warm = await host.request({ type: "warmup", provider: "claude", model: "haiku", system: "S" });
@@ -255,7 +279,7 @@ test("the host process answers over stdio and exits when stdin closes", async (t
     stdio: ["pipe", "pipe", "inherit"],
   });
   const reply = new Promise((resolve) => child.stdout.on("data", createDecoder(resolve, assert.fail)));
-  child.stdin.write(encodeMessage({ id: 7, type: "status" }));
+  child.stdin.write(encodeMessage({ id: 7, protocol: PROTOCOL_VERSION, type: "status" }));
   const status = await reply;
   assert.equal(status.id, 7);
   assert.equal(status.ok, true);
@@ -272,6 +296,7 @@ test("the extension and the bridge registration agree", () => {
   assert.equal(manifest.host_permissions, undefined);
   const background = readFileSync(join(EXTENSION_DIR, "background.js"), "utf8");
   assert.ok(background.includes(`const HOST_NAME = "${HOST_NAME}";`));
+  assert.ok(background.includes(`const PROTOCOL_VERSION = ${PROTOCOL_VERSION};`));
   const id = extensionIdFromKey(manifest.key);
   assert.match(id, /^[a-p]{32}$/);
   assert.deepEqual(hostManifest("C:\\launcher.cmd", id).allowed_origins, [`chrome-extension://${id}/`]);
