@@ -1,8 +1,9 @@
+import { bindModelPicker } from "./model-picker.js";
 import { LANGUAGES } from "./protocol.js";
 import { DISPLAY_STYLES, loadSettings } from "./settings.js";
 
 const $ = (id) => document.getElementById(id);
-const TEXT_FIELDS = ["model", "targetLang", "displayStyle"];
+const TEXT_FIELDS = ["targetLang", "displayStyle"];
 const NUMBER_FIELDS = ["maxSegmentsPerRequest", "maxCharsPerRequest"];
 
 function readForm() {
@@ -18,18 +19,21 @@ async function init() {
   for (const [value, label] of Object.entries(DISPLAY_STYLES)) $("displayStyle").add(new Option(label, value));
   for (const id of [...TEXT_FIELDS, ...NUMBER_FIELDS]) $(id).value = settings[id];
 
+  const check = async () => {
+    $("checkResult").textContent = "확인 중…";
+    $("checkResult").className = "status";
+    const result = await chrome.runtime.sendMessage({ type: "byos:check" });
+    $("checkResult").textContent = result.message;
+    $("checkResult").className = `status ${result.ok ? "ok" : "bad"}`;
+  };
+  bindModelPicker({ provider: $("provider"), model: $("model"), suggestions: $("modelSuggestions") }, settings, check);
+  $("check").addEventListener("click", check);
+
   $("form").addEventListener("submit", async (event) => {
     event.preventDefault();
     await chrome.storage.local.set(readForm());
     $("saved").textContent = "저장했습니다.";
     setTimeout(() => ($("saved").textContent = ""), 2000);
-  });
-
-  $("check").addEventListener("click", async () => {
-    $("checkResult").textContent = "확인 중…";
-    const result = await chrome.runtime.sendMessage({ type: "byos:check" });
-    $("checkResult").textContent = result.message;
-    $("checkResult").className = `status ${result.ok ? "ok" : "bad"}`;
   });
 }
 

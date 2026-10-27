@@ -1,33 +1,38 @@
 # BYOS Translate
 
-**Bring your own subscription.** 유료 번역기나 API 키 대신, 이미 구독 중인 Claude Code로 웹 페이지를
-원문·번역 대조로 보여 주는 Chrome/Edge 확장입니다.
+**Bring your own subscription.** 유료 번역기나 API 키 대신, 이미 구독 중인 AI(Claude, ChatGPT, Gemini)로
+웹 페이지를 원문·번역 대조로 보여 주는 Chrome/Edge 확장입니다.
 
 [English](README.md)
 
 ![각 문단 아래에 한국어 번역이 붙은 페이지](docs/screenshot.png)
 
 확장이 화면에 보이는 문단을 로컬 브리지로 보냅니다. 브리지는 필요할 때 브라우저가 네이티브 메시징으로
-직접 실행하며, 미리 띄워 둔 `claude -p` 프로세스로 번역해 각 문단 아래에 표시합니다.
+직접 실행하며, 각 회사의 공식 CLI를 내 로그인으로 실행해 번역하고 각 문단 아래에 표시합니다.
 
 ## 이용 조건
 
-- BYOS Translate는 Claude 자격 증명을 읽거나 저장하지 않습니다. 수정하지 않은 `claude` CLI를 실행할 뿐이며,
-  로그인은 Claude Code 안에서만 처리됩니다.
+- BYOS Translate는 자격 증명을 읽거나 저장하지 않습니다. 수정하지 않은 `claude`, `codex`, `gemini` CLI를
+  실행할 뿐이며, 로그인은 각 도구 안에서만 처리됩니다.
 - 본인이 자기 PC와 자기 로그인으로만 사용하세요. 브리지는 네트워크 포트를 열지 않고 이 확장에만 응답합니다.
   내 구독으로 다른 사람의 요청을 처리하는 것은 허용되지 않습니다.
-- 번역 사용량은 구독 사용 한도에 포함됩니다. Anthropic의
+- 번역 사용량은 구독 사용 한도에 포함되며, 각 제공자의 약관이 적용됩니다. Claude는 Anthropic의
   [Legal and compliance](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use)를
   참고하세요.
 
-BYOS Translate는 Anthropic과 관련이 없으며 Anthropic의 보증을 받지 않았습니다.
-Claude와 Claude Code는 Anthropic의 상표입니다.
+BYOS Translate는 Anthropic, OpenAI, Google과 관련이 없으며 이들의 보증을 받지 않았습니다.
+Claude, ChatGPT, Codex, Gemini는 각 소유자의 상표입니다.
 
 ## 요구 사항
 
 - Node.js 22 이상
-- [Claude Code](https://code.claude.com/docs) 설치 및 로그인
+- 다음 중 하나 이상 설치 및 로그인:
+  [Claude Code](https://code.claude.com/docs)(`claude`), [Codex CLI](https://github.com/openai/codex)(`codex`),
+  [Gemini CLI](https://github.com/google-gemini/gemini-cli)(`gemini`)
 - Chrome 116 이상 또는 Microsoft Edge
+
+Codex와 Gemini CLI 지원은 각 도구의 문서화된 헤드리스 모드를 따르며 가짜 CLI로 테스트했습니다.
+실제 도구로는 아직 실행해 보지 않았습니다.
 
 ## 설치
 
@@ -47,11 +52,11 @@ npm run install-host   # 한 번만: 브리지를 Chrome·Edge에 사용자 단�
 ## 사용
 
 - **Alt+Q**, 툴바 팝업, 또는 우클릭 메뉴 **BYOS Translate 켜기/끄기**로 켭니다. 한 번 더 하면 번역이 사라집니다.
-- 팝업에서 번역 언어와 모델(Haiku, Sonnet, Opus)을 고릅니다.
+- 팝업에서 번역 엔진(Claude, OpenAI, Google), 모델, 번역 언어를 고릅니다. 모델을 비우면 제공자의 기본 모델을 씁니다.
 
 ## 성능
 
-Windows 11, Claude Code 2.1.310, Haiku에서 측정:
+Windows 11, Claude Code 2.1.310, Haiku에서 측정(Codex와 Gemini CLI는 요청마다 실행하며 아직 측정하지 않음):
 
 | 시나리오 | 결과 |
 | --- | --- |

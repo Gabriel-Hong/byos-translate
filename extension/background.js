@@ -1,12 +1,12 @@
 import { buildSystemPrompt, buildUserPrompt, parseBatchResponse } from "./protocol.js";
-import { loadSettings, OBSOLETE_SETTINGS } from "./settings.js";
+import { loadSettings, OBSOLETE_SETTINGS, PROVIDERS, translationKey } from "./settings.js";
 
 const CACHE_LIMIT = 3000;
 const MAX_PARALLEL_REQUESTS = 3;
 const MENU_ID = "byos-toggle";
 // Must match HOST_NAME in bridge/native-host.mjs.
 const HOST_NAME = "io.github.byos_translate";
-// Closing the idle port lets the bridge and its Claude Code processes exit.
+// Closing the idle port lets the bridge and its provider processes exit.
 const HOST_IDLE_MS = 10 * 60_000;
 
 class BridgeError extends Error {}
@@ -18,7 +18,7 @@ let running = 0;
 const waiting = [];
 
 function cacheKey(settings, text) {
-  return `${settings.model}\u0000${settings.targetLang}\u0000${text}`;
+  return `${translationKey(settings)}\u0000${text}`;
 }
 
 function cacheGet(key) {
@@ -114,7 +114,8 @@ async function translateBatch(settings, texts, pageTitle) {
     callHost({
       type: "messages",
       body: {
-        model: settings.model,
+        provider: settings.provider,
+        model: settings.models[settings.provider],
         system: buildSystemPrompt(settings.targetLang),
         messages: [{ role: "user", content: buildUserPrompt(texts, { pageTitle }) }],
       },
@@ -160,17 +161,25 @@ async function translateTexts(texts, pageTitle) {
   return { translations: results, error: error ? String(error.message ?? error) : null };
 }
 
-// Reports the bridge state and starts Claude Code for the current settings, so
-// a translation started from the popup does not wait for it to boot.
+// Reports whether the chosen provider's tool is installed and, for Claude Code,
+// starts processes ahead of time so a translation started from the popup does
+// not wait for it to boot.
 async function checkBridge() {
   const settings = await loadSettings();
+  const { label } = PROVIDERS[settings.provider];
   try {
     const status = await callHost({
       type: "warmup",
-      model: settings.model,
+      provider: settings.provider,
+      model: settings.models[settings.provider],
       system: buildSystemPrompt(settings.targetLang),
     });
-    return { ok: true, message: `연결됨 · 대기 프로세스 ${status.runner.idle}개`, runner: status.runner };
+    const provider = status.providers[settings.provider];
+    if (!provider.available) {
+      return { ok: false, message: `${label}를 찾을 수 없습니다. 설치하고 로그인한 뒤 브라우저를 다시 시작하세요.` };
+    }
+    const warm = provider.idle ? ` · 대기 프로세스 ${provider.idle}개` : "";
+    return { ok: true, message: `연결됨 · ${label}${warm}` };
   } catch (error) {
     return { ok: false, message: error.message };
   }
@@ -209,11 +218,18 @@ chrome.commands.onCommand.addListener((command, tab) => {
   if (command === "toggle-translation" && tab?.id !== undefined) toggleTab(tab.id).catch(() => {});
 });
 
+// Settings for content scripts, which compare translationKey to decide
+// whether existing translations still apply.
+async function pageSettings() {
+  const settings = await loadSettings();
+  return { ...settings, translationKey: translationKey(settings) };
+}
+
 chrome.storage.onChanged.addListener(async (changes, area) => {
   if (area !== "local") return;
-  const relevant = ["model", "targetLang", "displayStyle", "maxSegmentsPerRequest", "maxCharsPerRequest"];
+  const relevant = ["provider", "models", "targetLang", "displayStyle", "maxSegmentsPerRequest", "maxCharsPerRequest"];
   if (!relevant.some((key) => key in changes)) return;
-  const settings = await loadSettings();
+  const settings = await pageSettings();
   for (const tab of await chrome.tabs.query({})) {
     if (tab.id !== undefined) sendToTab(tab.id, { type: "byos:settings-changed", settings }).catch(() => {});
   }
@@ -223,7 +239,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const handle = async () => {
     switch (message?.type) {
       case "byos:settings":
-        return loadSettings();
+        return pageSettings();
       case "byos:translate":
         return translateTexts(message.texts, message.pageTitle);
       case "byos:check":

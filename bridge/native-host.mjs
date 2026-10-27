@@ -2,16 +2,18 @@
 // and closes stdin when the extension disconnects or the browser exits.
 // Every message is a 4-byte little-endian length followed by UTF-8 JSON.
 //
-// Requests:  { id, type: "messages", body }        Anthropic Messages body
-//            { id, type: "warmup", model, system }  start processes ahead of use
+// Requests:  { id, type: "messages", body }                  Anthropic Messages body plus provider
+//            { id, type: "warmup", provider, model, system }  start processes ahead of use
 //            { id, type: "status" }
 // Responses: { id, ok: true, result } or { id, ok: false, error: { type, message } }
 import { appendFileSync, mkdirSync, renameSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { ClaudeRunner } from "./claude-runner.mjs";
 import { defaultDataDir, loadConfig } from "./config.mjs";
 import { messageResponse, parseMessagesRequest, parseProcessKey, runnerErrorType } from "./messages.mjs";
+import { ProcessRunner } from "./process-runner.mjs";
+import { createDriver, PROVIDER_IDS } from "./providers.mjs";
+import { resolveCommand } from "./resolve-command.mjs";
 
 export const HOST_NAME = "io.github.byos_translate";
 const MAX_INPUT_BYTES = 8 * 1024 * 1024;
@@ -53,12 +55,51 @@ export function createDecoder(onMessage, onFatal) {
   };
 }
 
+// One runner per provider, created on first use. `commands` maps each provider
+// to the resolved { command, prefixArgs, found } of its command-line tool.
+export function createProviders({ config, commands, runnerOptions = {} }) {
+  const drivers = Object.fromEntries(PROVIDER_IDS.map((id) => [id, createDriver(id, { dataDir: config.dataDir })]));
+  const runners = new Map();
+  return {
+    defaultModels: Object.fromEntries(PROVIDER_IDS.map((id) => [id, drivers[id].defaultModel])),
+    runner(provider) {
+      if (!runners.has(provider)) {
+        runners.set(provider, new ProcessRunner({
+          driver: drivers[provider],
+          command: commands[provider].command,
+          prefixArgs: commands[provider].prefixArgs,
+          // An empty folder, so no project instruction or settings files apply.
+          cwd: join(config.dataDir, "empty-cwd"),
+          maxConcurrent: config.maxConcurrent,
+          warmPerKey: config.warmPerKey,
+          maxIdleProcesses: config.maxIdleProcesses,
+          idleTtlMs: config.idleTtlMs,
+          requestTimeoutMs: config.requestTimeoutMs,
+          ...runnerOptions,
+        }));
+      }
+      return runners.get(provider);
+    },
+    status() {
+      return Object.fromEntries(PROVIDER_IDS.map((id) => [id, {
+        label: drivers[id].label,
+        available: commands[id].found,
+        ...runners.get(id)?.snapshot(),
+      }]));
+    },
+    async close() {
+      await Promise.all([...runners.values()].map((runner) => runner.close()));
+    },
+  };
+}
+
 function failure(type, message) {
   return { ok: false, error: { type, message } };
 }
 
 // Serves requests until the input ends; resolves when the browser disconnects.
-export function serveNativeHost({ input, output, runner, defaultModel, log = () => {} }) {
+export function serveNativeHost({ input, output, providers, log = () => {} }) {
+  const { defaultModels } = providers;
   const send = (id, reply) => {
     let frame = encodeMessage({ id, ...reply });
     if (frame.length - 4 > MAX_OUTPUT_BYTES) {
@@ -71,24 +112,25 @@ export function serveNativeHost({ input, output, runner, defaultModel, log = () 
     const id = message?.id ?? null;
     switch (message?.type) {
       case "status":
-        return send(id, { ok: true, result: { runner: runner.snapshot() } });
+        return send(id, { ok: true, result: { providers: providers.status() } });
       case "warmup": {
-        const key = parseProcessKey(message, { defaultModel });
+        const key = parseProcessKey(message, { defaultModels });
         if (!key.ok) return send(id, key);
-        runner.warm(key.value);
-        return send(id, { ok: true, result: { runner: runner.snapshot() } });
+        providers.runner(key.value.provider).warm(key.value);
+        return send(id, { ok: true, result: { providers: providers.status() } });
       }
       case "messages": {
-        const parsed = parseMessagesRequest(message.body, { defaultModel });
+        const parsed = parseMessagesRequest(message.body, { defaultModels });
         if (!parsed.ok) return send(id, parsed);
+        const { provider, model, prompt } = parsed.value;
         const started = Date.now();
         try {
-          const completion = await runner.complete(parsed.value);
+          const completion = await providers.runner(provider).complete(parsed.value);
           send(id, { ok: true, result: messageResponse(completion) });
-          log(`ok ${parsed.value.model} in=${parsed.value.prompt.length}ch out=${completion.text.length}ch ${Date.now() - started}ms`);
+          log(`ok ${provider} ${model} in=${prompt.length}ch out=${completion.text.length}ch ${Date.now() - started}ms`);
         } catch (error) {
           send(id, failure(runnerErrorType(error), error.message));
-          log(`${error.kind ?? "error"} ${parsed.value.model}: ${String(error.message).slice(0, 200)} ${Date.now() - started}ms`);
+          log(`${error.kind ?? "error"} ${provider} ${model}: ${String(error.message).slice(0, 200)} ${Date.now() - started}ms`);
         }
         return undefined;
       }
@@ -130,30 +172,16 @@ function fileLogger(file) {
 
 async function main() {
   const dataDir = defaultDataDir();
-  mkdirSync(join(dataDir, "claude-cwd"), { recursive: true });
+  mkdirSync(join(dataDir, "empty-cwd"), { recursive: true });
   const log = fileLogger(join(dataDir, "native-host.log"));
   try {
     log(`started by ${process.argv[2] ?? "unknown caller"}`);
     const config = loadConfig(dataDir);
-    // Claude Code runs in an empty folder so no project CLAUDE.md, settings or memory apply.
-    const runner = new ClaudeRunner({
-      command: config.claudeCommand,
-      cwd: join(config.dataDir, "claude-cwd"),
-      maxConcurrent: config.maxConcurrent,
-      warmPerKey: config.warmPerKey,
-      maxIdleProcesses: config.maxIdleProcesses,
-      idleTtlMs: config.idleTtlMs,
-      requestTimeoutMs: config.requestTimeoutMs,
-    });
-    await serveNativeHost({
-      input: process.stdin,
-      output: process.stdout,
-      runner,
-      defaultModel: config.defaultModel,
-      log,
-    });
-    log("disconnected; stopping Claude Code processes");
-    await runner.close();
+    const commands = Object.fromEntries(PROVIDER_IDS.map((id) => [id, resolveCommand(config[`${id}Command`])]));
+    const providers = createProviders({ config, commands });
+    await serveNativeHost({ input: process.stdin, output: process.stdout, providers, log });
+    log("disconnected; stopping provider processes");
+    await providers.close();
     process.exit(0);
   } catch (error) {
     log(`fatal: ${error.stack ?? error}`);

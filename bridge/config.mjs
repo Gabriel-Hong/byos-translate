@@ -5,8 +5,9 @@ import { join } from "node:path";
 const APP_DIR = "byos-translate";
 
 export const DEFAULT_CONFIG = Object.freeze({
-  defaultModel: "haiku",
   claudeCommand: "claude",
+  codexCommand: "codex",
+  geminiCommand: "gemini",
   maxConcurrent: 4,
   warmPerKey: 2,
   maxIdleProcesses: 4,
@@ -59,7 +60,7 @@ export function validateConfig(config) {
       throw new Error(`${key} must be an integer >= ${min}, got ${value}`);
     }
   }
-  for (const key of ["claudeCommand", "defaultModel"]) {
+  for (const key of ["claudeCommand", "codexCommand", "geminiCommand"]) {
     if (typeof config[key] !== "string" || config[key].length === 0) {
       throw new Error(`${key} must be a non-empty string`);
     }

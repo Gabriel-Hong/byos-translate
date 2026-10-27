@@ -336,7 +336,7 @@
     } else if (message?.type === "byos:status") {
       sendResponse({ enabled });
     } else if (message?.type === "byos:settings-changed" && enabled) {
-      const retranslate = message.settings.targetLang !== settings.targetLang || message.settings.model !== settings.model;
+      const retranslate = message.settings.translationKey !== settings.translationKey;
       if (retranslate) {
         disable();
         enable();

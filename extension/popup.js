@@ -1,3 +1,4 @@
+import { bindModelPicker } from "./model-picker.js";
 import { LANGUAGES } from "./protocol.js";
 import { loadSettings } from "./settings.js";
 
@@ -18,14 +19,24 @@ function showToggle(enabled) {
   $("toggle").textContent = enabled ? "원문만 보기" : "이 페이지 번역";
 }
 
+async function showBridgeStatus() {
+  $("bridge").textContent = "브리지 확인 중…";
+  $("bridge").className = "status";
+  const check = await chrome.runtime.sendMessage({ type: "byos:check" });
+  $("bridge").textContent = `● ${check.message}`;
+  $("bridge").className = `status ${check.ok ? "ok" : "bad"}`;
+}
+
 async function init() {
   const settings = await loadSettings();
   fillLanguages($("targetLang"), settings.targetLang);
-  $("model").value = settings.model;
-  if ($("model").value !== settings.model) $("model").add(new Option(settings.model, settings.model, true, true));
+  bindModelPicker(
+    { provider: $("provider"), model: $("model"), suggestions: $("modelSuggestions") },
+    settings,
+    showBridgeStatus,
+  );
 
   $("targetLang").addEventListener("change", (event) => chrome.storage.local.set({ targetLang: event.target.value }));
-  $("model").addEventListener("change", (event) => chrome.storage.local.set({ model: event.target.value }));
   $("openOptions").addEventListener("click", (event) => {
     event.preventDefault();
     chrome.runtime.openOptionsPage();
@@ -50,9 +61,7 @@ async function init() {
     if (result?.enabled) window.close();
   });
 
-  const check = await chrome.runtime.sendMessage({ type: "byos:check" });
-  $("bridge").textContent = `● ${check.message}`;
-  $("bridge").className = `status ${check.ok ? "ok" : "bad"}`;
+  await showBridgeStatus();
 }
 
 init();

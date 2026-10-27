@@ -1,7 +1,7 @@
-// Parsing of the extension's requests (an Anthropic Messages body) and the
-// matching response shape.
+// Parsing of the extension's requests (an Anthropic Messages body plus a
+// provider) and the matching response shape.
 //
-// Claude Code accepts one user turn per process and has no sampling flags, so
+// Each process takes one user turn and the CLIs have no sampling flags, so
 // exactly one user message is accepted and sampling fields such as max_tokens,
 // temperature and thinking are ignored.
 import { randomUUID } from "node:crypto";
@@ -32,11 +32,16 @@ function textContent(content) {
   return parts.join("\n\n");
 }
 
-// Model and system prompt select a Claude Code process, for requests and warm-ups alike.
-export function parseProcessKey({ model, system }, { defaultModel }) {
-  const chosen = model ?? defaultModel;
-  if (typeof chosen !== "string" || !MODEL_PATTERN.test(chosen)) {
-    return invalid("model must be a Claude model name or alias such as haiku, sonnet or claude-haiku-4-5.");
+// Provider, model and system prompt select a process, for requests and
+// warm-ups alike. An empty model means the provider's default; for Codex that
+// is the model configured in Codex itself.
+export function parseProcessKey({ provider = "claude", model, system }, { defaultModels }) {
+  if (!Object.hasOwn(defaultModels, provider)) {
+    return invalid(`provider must be one of ${Object.keys(defaultModels).join(", ")}.`);
+  }
+  const chosen = model || defaultModels[provider];
+  if (typeof chosen !== "string" || (chosen !== "" && !MODEL_PATTERN.test(chosen))) {
+    return invalid("model must be a model name or alias such as haiku, gemini-2.5-flash or gpt-5.");
   }
   let text = "";
   if (system !== undefined && system !== null) {
@@ -46,14 +51,14 @@ export function parseProcessKey({ model, system }, { defaultModel }) {
   if (text.length > MAX_SYSTEM_CHARS) {
     return invalid(`system must be at most ${MAX_SYSTEM_CHARS} characters.`);
   }
-  return { ok: true, value: { model: chosen, system: text } };
+  return { ok: true, value: { provider, model: chosen, system: text } };
 }
 
-export function parseMessagesRequest(body, { defaultModel }) {
+export function parseMessagesRequest(body, { defaultModels }) {
   if (!isObject(body)) return invalid("Request body must be a JSON object.");
   if (body.stream === true) return invalid("stream=true is not supported by this bridge.");
 
-  const key = parseProcessKey(body, { defaultModel });
+  const key = parseProcessKey(body, { defaultModels });
   if (!key.ok) return key;
 
   if (!Array.isArray(body.messages) || body.messages.length !== 1) {

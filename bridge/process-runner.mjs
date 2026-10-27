@@ -1,17 +1,16 @@
-// Runs one-shot Claude Code (`claude -p`) processes for text completions.
+// Runs a provider's command-line tool for text completions, one prompt per
+// process, so context never accumulates between requests. A driver
+// (providers.mjs) supplies each tool's arguments, input and output parsing.
 //
-// Starting Claude Code dominates latency (~4-6 s on Windows) while the model call
-// itself is ~1-2 s. A process started with `--input-format stream-json` finishes
-// its startup and then waits for stdin without calling the API, so the runner
-// keeps a few started processes per (model, system prompt) and hands each one
-// exactly one prompt. Context therefore never accumulates between requests.
+// Starting Claude Code dominates its latency (~4-6 s on Windows) while the model
+// call itself is ~1-2 s. Drivers whose process finishes starting and then waits
+// for stdin without calling the API are kept warm per (model, system prompt).
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 
 const STDERR_TAIL_CHARS = 4096;
-const MAX_STDOUT_BUFFER_CHARS = 32 * 1024 * 1024;
+const MAX_STDOUT_CHARS = 32 * 1024 * 1024;
 const EXIT_GRACE_MS = 10_000;
-const DEFAULT_SYSTEM_PROMPT = "Respond to the user's request directly.";
 
 export class RunnerError extends Error {
   // kind: spawn | exited | timeout | aborted | upstream | protocol | busy | closed
@@ -23,33 +22,17 @@ export class RunnerError extends Error {
   }
 }
 
-export function claudeArgs(model, system) {
-  return [
-    "-p",
-    `--model=${model}`,
-    // A plain completion: no tools, MCP servers, hooks, settings files or saved sessions.
-    "--tools", "",
-    "--strict-mcp-config",
-    "--mcp-config", '{"mcpServers":{}}',
-    "--setting-sources", "",
-    "--settings", '{"disableAllHooks":true}',
-    "--no-session-persistence",
-    "--input-format", "stream-json",
-    "--output-format", "stream-json",
-    "--verbose",
-    // The `=` form keeps a prompt that starts with "-" from being read as a flag.
-    `--system-prompt=${system || DEFAULT_SYSTEM_PROMPT}`,
-  ];
-}
-
 function processKey(model, system) {
   return createHash("sha256").update(model).update("\0").update(system ?? "").digest("hex");
 }
 
-class ClaudeProcess {
-  constructor({ command, args, cwd, env, key }) {
+class CliProcess {
+  constructor({ command, args, cwd, env, key, driver, model }) {
     this.key = key;
+    this.driver = driver;
+    this.model = model;
     this.exitInfo = null;
+    this.stdout = "";
     this.stderrTail = "";
     this.onEvent = null;
     this.idleTimer = null;
@@ -69,19 +52,19 @@ class ClaudeProcess {
     this.child.stderr.on("data", (chunk) => {
       this.stderrTail = (this.stderrTail + chunk).slice(-STDERR_TAIL_CHARS);
     });
-    let buffer = "";
     this.child.stdout.setEncoding("utf8");
     this.child.stdout.on("data", (chunk) => {
-      buffer += chunk;
-      if (buffer.length > MAX_STDOUT_BUFFER_CHARS) {
-        this.protocolError = `stdout line exceeded ${MAX_STDOUT_BUFFER_CHARS} characters`;
+      this.stdout += chunk;
+      if (this.stdout.length > MAX_STDOUT_CHARS) {
+        this.protocolError = `${driver.label} wrote more than ${MAX_STDOUT_CHARS} characters`;
         this.kill();
         return;
       }
+      if (!driver.parseEvent) return;
       let newline;
-      while ((newline = buffer.indexOf("\n")) >= 0) {
-        const line = buffer.slice(0, newline).trim();
-        buffer = buffer.slice(newline + 1);
+      while ((newline = this.stdout.indexOf("\n")) >= 0) {
+        const line = this.stdout.slice(0, newline).trim();
+        this.stdout = this.stdout.slice(newline + 1);
         if (!line) continue;
         let event;
         try {
@@ -102,8 +85,8 @@ class ClaudeProcess {
     if (this.exitInfo === null) this.child.kill();
   }
 
-  // Sends one prompt and resolves with Claude Code's `result` event.
-  run(prompt, { signal, timeoutMs }) {
+  // Sends one prompt and resolves with the driver's completion.
+  run(input, { signal, timeoutMs }) {
     return new Promise((resolve, reject) => {
       let settled = false;
       let timer;
@@ -114,6 +97,14 @@ class ClaudeProcess {
         signal?.removeEventListener("abort", onAbort);
         this.onEvent = null;
         settle(value);
+      };
+      const settleWith = (parse) => {
+        try {
+          const completion = parse();
+          if (completion) finish(resolve, completion);
+        } catch (error) {
+          finish(reject, error);
+        }
       };
       const onAbort = () => {
         this.kill();
@@ -130,14 +121,18 @@ class ClaudeProcess {
       signal?.addEventListener("abort", onAbort, { once: true });
       timer = setTimeout(() => {
         this.kill();
-        finish(reject, new RunnerError("timeout", `Claude Code did not answer within ${timeoutMs} ms.`));
+        finish(reject, new RunnerError("timeout", `${this.driver.label} did not answer within ${timeoutMs} ms.`));
       }, timeoutMs);
-      this.onEvent = (event) => {
-        if (event?.type === "result") finish(resolve, event);
-      };
-      this.exited.then(() => finish(reject, this.#exitError()));
-      const message = { type: "user", message: { role: "user", content: prompt } };
-      this.child.stdin.end(`${JSON.stringify(message)}\n`);
+      if (this.driver.parseEvent) {
+        this.onEvent = (event) => settleWith(() => this.driver.parseEvent(event, this.model));
+      }
+      this.exited.then(({ code }) => {
+        if (this.driver.parseExit && !this.spawnError && !this.protocolError) {
+          settleWith(() => this.driver.parseExit({ stdout: this.stdout, stderr: this.stderrTail, code }, this.model));
+        }
+        finish(reject, this.#exitError());
+      });
+      this.child.stdin.end(input);
     });
   }
 
@@ -148,18 +143,20 @@ class ClaudeProcess {
   }
 
   #exitError() {
+    const { label } = this.driver;
     if (this.spawnError) {
-      return new RunnerError("spawn", `Cannot start Claude Code: ${this.spawnError.message}`, {
+      const hint = this.spawnError.code === "ENOENT" ? " Is it installed and on PATH?" : "";
+      return new RunnerError("spawn", `Cannot start ${label}: ${this.spawnError.message}.${hint}`, {
         cause: this.spawnError,
       });
     }
     if (this.protocolError) return new RunnerError("protocol", this.protocolError);
-    const detail = this.stderrTail.trim() || "no stderr output";
-    return new RunnerError("exited", `Claude Code exited (code ${this.exitInfo?.code}) before answering: ${detail}`);
+    const detail = this.stderrTail.trim() || "no error output";
+    return new RunnerError("exited", `${label} exited (code ${this.exitInfo?.code}) before answering: ${detail}`);
   }
 }
 
-export class ClaudeRunner {
+export class ProcessRunner {
   #idle = [];
   #live = new Set();
   #waiters = [];
@@ -168,7 +165,8 @@ export class ClaudeRunner {
   #stats = { spawned: 0, warmHits: 0, coldStarts: 0, completed: 0, failed: 0 };
 
   constructor({
-    command = "claude",
+    driver,
+    command,
     prefixArgs = [],
     cwd,
     env = process.env,
@@ -178,10 +176,12 @@ export class ClaudeRunner {
     maxIdleProcesses = 4,
     idleTtlMs = 600_000,
     requestTimeoutMs = 120_000,
-  } = {}) {
+  }) {
+    this.driver = driver;
     this.options = {
       command, prefixArgs, cwd, env, maxConcurrent, maxQueued,
-      warmPerKey, maxIdleProcesses, idleTtlMs, requestTimeoutMs,
+      warmPerKey: driver.warmable ? warmPerKey : 0,
+      maxIdleProcesses, idleTtlMs, requestTimeoutMs,
     };
   }
 
@@ -209,8 +209,10 @@ export class ClaudeRunner {
         proc = this.#spawn(model, system, key);
       }
       this.#replenish(model, system, key);
-      const event = await proc.run(prompt, { signal, timeoutMs: this.options.requestTimeoutMs });
-      const completion = toCompletion(event, model);
+      const completion = await proc.run(this.driver.input(prompt, system), {
+        signal,
+        timeoutMs: this.options.requestTimeoutMs,
+      });
       this.#stats.completed++;
       return completion;
     } catch (error) {
@@ -222,7 +224,7 @@ export class ClaudeRunner {
     }
   }
 
-  // Starts processes for an upcoming request so it does not wait for Claude Code to boot.
+  // Starts processes for an upcoming request so it does not wait for the tool to boot.
   warm({ model, system }) {
     if (!this.#closed) this.#replenish(model, system, processKey(model, system));
   }
@@ -278,12 +280,14 @@ export class ClaudeRunner {
   }
 
   #spawn(model, system, key) {
-    const proc = new ClaudeProcess({
+    const proc = new CliProcess({
       command: this.options.command,
-      args: [...this.options.prefixArgs, ...claudeArgs(model, system)],
+      args: [...this.options.prefixArgs, ...this.driver.args(model, system)],
       cwd: this.options.cwd,
-      env: this.options.env,
+      env: { ...this.options.env, ...this.driver.env?.(model, system) },
       key,
+      driver: this.driver,
+      model,
     });
     this.#stats.spawned++;
     this.#live.add(proc);
@@ -327,20 +331,4 @@ export class ClaudeRunner {
       warm++;
     }
   }
-}
-
-function toCompletion(event, requestedModel) {
-  if (event.is_error || event.subtype !== "success") {
-    const message = typeof event.result === "string" && event.result
-      ? event.result
-      : `Claude Code reported ${event.subtype ?? "an error"}.`;
-    throw new RunnerError("upstream", message, { status: event.api_error_status ?? undefined });
-  }
-  const models = Object.keys(event.modelUsage ?? {});
-  return {
-    text: typeof event.result === "string" ? event.result : "",
-    stopReason: event.stop_reason ?? "end_turn",
-    usage: event.usage ?? {},
-    model: models[0] ?? requestedModel,
-  };
 }

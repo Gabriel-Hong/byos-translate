@@ -8,8 +8,10 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync }
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { defaultDataDir } from "../bridge/config.mjs";
+import { defaultDataDir, loadConfig } from "../bridge/config.mjs";
 import { HOST_NAME } from "../bridge/native-host.mjs";
+import { PROVIDER_IDS } from "../bridge/providers.mjs";
+import { resolveCommand } from "../bridge/resolve-command.mjs";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const HOST_SCRIPT = join(ROOT, "bridge", "native-host.mjs");
@@ -57,21 +59,14 @@ function browserDirs() {
   };
 }
 
-function which(command) {
-  const finder = process.platform === "win32" ? "where" : "which";
+function version({ command, prefixArgs }) {
   try {
-    return execFileSync(finder, [command], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean);
-  } catch {
-    return [];
-  }
-}
-
-function version(command) {
-  try {
-    return execFileSync(command, ["--version"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 30_000 }).trim();
+    return execFileSync(command, [...prefixArgs, "--version"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 30_000,
+      windowsHide: true,
+    }).trim().split(/\r?\n/)[0];
   } catch {
     return null;
   }
@@ -90,26 +85,25 @@ function registryValue(key) {
   }
 }
 
-// The browser starts the host with its own environment, so check that the
-// tools the host needs resolve the same way.
-function checkTools() {
+// The browser starts the host with the user's environment, so the tools are
+// resolved the same way the host resolves them.
+function checkTools(config) {
   const problems = [];
-  const node = process.platform === "win32" ? which("node")[0] : process.execPath;
-  const nodeVersion = node && version(node);
+  // The Windows launcher runs `node` from PATH; elsewhere the launcher names this node.
+  const node = process.platform === "win32" ? resolveCommand("node") : { command: process.execPath, prefixArgs: [], found: true };
+  const nodeVersion = node.found ? version(node) : null;
   const nodeMajor = Number(/^v(\d+)/.exec(nodeVersion ?? "")?.[1]);
   if (!nodeVersion) problems.push("node was not found on PATH.");
   else if (nodeMajor < MIN_NODE_MAJOR) problems.push(`node on PATH is ${nodeVersion}; ${MIN_NODE_MAJOR} or later is required.`);
 
-  const claudeCandidates = which("claude");
-  const claude = process.platform === "win32"
-    ? claudeCandidates.find((path) => path.toLowerCase().endsWith(".exe"))
-    : claudeCandidates[0];
-  if (!claude) {
-    problems.push(process.platform === "win32" && claudeCandidates.length > 0
-      ? `Only ${claudeCandidates[0]} was found; install Claude Code with its native installer so claude.exe is on PATH.`
-      : "claude was not found on PATH. Install Claude Code and sign in with `claude` first.");
+  const providers = PROVIDER_IDS.map((id) => {
+    const resolved = resolveCommand(config[`${id}Command`]);
+    return { id, resolved, version: resolved.found ? version(resolved) : null };
+  });
+  if (!providers.some(({ resolved }) => resolved.found)) {
+    problems.push("None of claude, codex or gemini was found on PATH. Install one of them and sign in first.");
   }
-  return { node, nodeVersion, claude, claudeVersion: claude && version(claude), problems };
+  return { node: node.command, nodeVersion, providers, problems };
 }
 
 function install() {
@@ -118,9 +112,11 @@ function install() {
   const dataDir = defaultDataDir();
   mkdirSync(dataDir, { recursive: true });
 
-  const tools = checkTools();
-  console.log(`node    ${tools.node ?? "(missing)"} ${tools.nodeVersion ?? ""}`);
-  console.log(`claude  ${tools.claude ?? "(missing)"} ${tools.claudeVersion ?? ""}`);
+  const tools = checkTools(loadConfig(dataDir));
+  console.log(`node    ${tools.nodeVersion ? `${tools.node} ${tools.nodeVersion}` : "(missing)"}`);
+  for (const { id, resolved, version: found } of tools.providers) {
+    console.log(`${id.padEnd(7)} ${resolved.found ? `${resolved.prefixArgs[0] ?? resolved.command} ${found ?? ""}` : "(not installed)"}`);
+  }
 
   const registered = [];
   if (process.platform === "win32") {
@@ -134,7 +130,9 @@ function install() {
     }
   } else {
     const launcher = join(dataDir, "native-host.sh");
-    const path = [dirname(process.execPath), tools.claude && dirname(tools.claude)].filter(Boolean).join(":");
+    // Browsers started from the desktop often lack the shell PATH, so the tools found now are added.
+    const toolDirs = tools.providers.filter(({ resolved }) => resolved.found).map(({ resolved }) => dirname(resolved.command));
+    const path = [...new Set([dirname(process.execPath), ...toolDirs])].join(":");
     writeFileSync(
       launcher,
       [

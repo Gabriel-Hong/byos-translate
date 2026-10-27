@@ -1,32 +1,38 @@
 # BYOS Translate
 
-**Bring your own subscription.** Bilingual web page translation for Chrome and Edge that uses the Claude Code
-you already pay for, instead of a paid translator or an API key.
+**Bring your own subscription.** Bilingual web page translation for Chrome and Edge that uses the AI
+subscription you already pay for (Claude, ChatGPT or Gemini) instead of a paid translator or an API key.
 
 [한국어](README.ko.md)
 
 ![A page with each paragraph followed by its Korean translation](docs/screenshot.png)
 
 The extension sends the paragraphs on screen to a local bridge, which the browser starts on demand through
-native messaging. The bridge translates them with pre-started `claude -p` processes, and each translation
-appears under its paragraph.
+native messaging. The bridge runs the provider's official command-line tool with your own sign-in, and each
+translation appears under its paragraph.
 
 ## Terms of use
 
-- BYOS Translate never reads or stores your Claude credentials. It only runs the unmodified `claude` CLI,
-  and sign-in stays inside Claude Code.
+- BYOS Translate never reads or stores your credentials. It only runs the unmodified `claude`, `codex` or
+  `gemini` CLI, and sign-in stays inside that tool.
 - Use it yourself, on your own machine and sign-in. The bridge has no network port and answers only this
   extension; serving other people through your plan is not permitted.
-- Translations count against your plan's usage limits. See Anthropic's
-  [Legal and compliance](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use).
+- Translations count against your plan's usage limits, and each provider's terms apply. For Claude, see
+  Anthropic's [Legal and compliance](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use).
 
-BYOS Translate is not affiliated with or endorsed by Anthropic. Claude and Claude Code are trademarks of Anthropic.
+BYOS Translate is not affiliated with or endorsed by Anthropic, OpenAI or Google. Claude, ChatGPT, Codex and
+Gemini are trademarks of their respective owners.
 
 ## Requirements
 
 - Node.js 22 or later
-- [Claude Code](https://code.claude.com/docs) installed and signed in
+- At least one of these, installed and signed in:
+  [Claude Code](https://code.claude.com/docs) (`claude`), [Codex CLI](https://github.com/openai/codex) (`codex`),
+  [Gemini CLI](https://github.com/google-gemini/gemini-cli) (`gemini`)
 - Chrome 116+ or Microsoft Edge
+
+Codex and Gemini CLI support follows their documented headless modes and is tested with stand-ins; it has not
+yet been run against the real tools.
 
 ## Install
 
@@ -47,12 +53,14 @@ Optional settings (`config.json`) and the bridge log (`native-host.log`) are in 
 
 - Press **Alt+Q**, use the toolbar popup, or right-click → **BYOS Translate 켜기/끄기**. Repeat to remove the
   translations.
-- Pick the target language and model (Haiku, Sonnet, Opus) in the popup.
+- Pick the engine (Claude, OpenAI or Google), model and target language in the popup. Leave the model empty
+  for the provider's default.
 - The UI is in Korean for now.
 
 ## Performance
 
-Measured on Windows 11 with Claude Code 2.1.310 and Haiku:
+Measured on Windows 11 with Claude Code 2.1.310 and Haiku (Codex and Gemini CLI start per request and have not
+been measured):
 
 | Scenario | Result |
 | --- | --- |
