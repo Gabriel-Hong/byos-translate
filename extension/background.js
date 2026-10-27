@@ -6,7 +6,7 @@ const MAX_PARALLEL_REQUESTS = 3;
 const MENU_ID = "byos-toggle";
 // Must match HOST_NAME and PROTOCOL_VERSION in bridge/native-host.mjs.
 const HOST_NAME = "io.github.byos_translate";
-const PROTOCOL_VERSION = 2;
+const PROTOCOL_VERSION = 3;
 const VERSION_MISMATCH =
   "브리지와 확장의 버전이 다릅니다. chrome://extensions에서 BYOS Translate를 새로 고치거나 브라우저를 다시 시작하세요. " +
   "repo 폴더를 옮겼거나 여러 개라면 'npm run install-host'도 다시 실행하세요.";
@@ -206,6 +206,16 @@ async function checkBridge() {
   }
 }
 
+// Models the provider's tool offers to the signed-in account; null when the
+// tool cannot list them.
+async function listModels(provider) {
+  try {
+    return { models: (await callHost({ type: "models", provider })).models };
+  } catch (error) {
+    return { models: null, error: error.message };
+  }
+}
+
 async function sendToTab(tabId, message) {
   return chrome.tabs.sendMessage(tabId, message);
 }
@@ -265,6 +275,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return translateTexts(message.texts, message.pageTitle);
       case "byos:check":
         return checkBridge();
+      case "byos:models":
+        return listModels(message.provider);
       case "byos:toggle-tab":
         return toggleTab(message.tabId);
       default:

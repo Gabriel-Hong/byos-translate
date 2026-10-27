@@ -1,7 +1,8 @@
-// Must match bridge/providers.mjs. None of the command-line tools lists its
-// models non-interactively, so each list is fixed here:
+// Must match bridge/providers.mjs. Model choices per provider:
 // - Claude Code aliases always resolve to the latest model of that family.
-// - Gemini CLI models are the ones its documentation offers.
+// - Codex lists the models the signed-in account can use (codex app-server
+//   model/list); `listsModels` adds them after the fixed entries.
+// - Gemini CLI models are the ones its documentation offers; it cannot list them.
 // - An empty model uses the provider's default; for Codex, the one configured in Codex.
 // Any other model name can be typed in through "직접 입력".
 export const PROVIDERS = {
@@ -17,6 +18,7 @@ export const PROVIDERS = {
   codex: {
     label: "OpenAI (Codex CLI)",
     models: [{ value: "", label: "Codex 기본 모델" }],
+    listsModels: true,
   },
   gemini: {
     label: "Google (Gemini CLI)",

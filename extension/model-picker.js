@@ -9,8 +9,7 @@ export function bindModelPicker({ provider, model, customModel }, settings, onSa
     provider.add(new Option(label, id, false, id === settings.provider));
   }
 
-  const show = () => {
-    const { models } = PROVIDERS[provider.value];
+  const render = (models) => {
     const current = settings.models[provider.value] ?? "";
     const listed = models.some(({ value }) => value === current);
     model.replaceChildren(
@@ -20,6 +19,21 @@ export function bindModelPicker({ provider, model, customModel }, settings, onSa
     model.value = listed ? current : CUSTOM;
     customModel.value = listed ? "" : current;
     customModel.hidden = listed;
+  };
+
+  // Shows the fixed choices at once, then adds the models the provider's tool
+  // reports for the account when it can list them.
+  const show = async () => {
+    const id = provider.value;
+    const { models, listsModels } = PROVIDERS[id];
+    render(models);
+    if (!listsModels) return;
+    const reply = await chrome.runtime.sendMessage({ type: "byos:models", provider: id });
+    if (provider.value !== id || !reply?.models?.length || document.activeElement === customModel) return;
+    render([
+      ...models,
+      ...reply.models.map(({ id: value, label, isDefault }) => ({ value, label: isDefault ? `${label} · 기본` : label })),
+    ]);
   };
 
   const save = async (value) => {

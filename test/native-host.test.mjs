@@ -25,12 +25,17 @@ const EXTENSION_DIR = fileURLToPath(new URL("../extension/", import.meta.url));
 
 // Serves the host over in-memory streams; fake-claude.mjs stands in for Claude
 // Code and fake-cli.mjs for Codex and the Gemini CLI.
-function startHost(t, runnerOptions = {}) {
+function startHost(t, runnerOptions = {}, commandOverrides = {}) {
   const dataDir = mkdtempSync(join(tmpdir(), "byos-host-"));
   const fake = (script) => ({ command: process.execPath, prefixArgs: [script], found: true });
   const providers = createProviders({
     config: { ...DEFAULT_CONFIG, dataDir },
-    commands: { claude: fake(FAKE_CLAUDE), codex: fake(FAKE_CLI), gemini: { ...fake(FAKE_CLI), found: false } },
+    commands: {
+      claude: fake(FAKE_CLAUDE),
+      codex: fake(FAKE_CLI),
+      gemini: { ...fake(FAKE_CLI), found: false },
+      ...commandOverrides,
+    },
     runnerOptions: { requestTimeoutMs: 10_000, warmPerKey: 0, cwd: dataDir, ...runnerOptions },
   });
   const runner = providers.runner("claude");
@@ -189,6 +194,32 @@ test("a warm-up starts Claude Code processes that serve the next request", async
   // Codex and Gemini start per request, so a warm-up starts nothing for them.
   const codex = await host.request({ type: "warmup", provider: "codex", model: "", system: "S" });
   assert.equal(codex.result.providers.codex.live, 0);
+});
+
+test("lists the models Codex offers through app-server, across pages", async (t) => {
+  const host = startHost(t);
+  const reply = await host.request({ type: "models", provider: "codex" });
+  assert.deepEqual(reply.result.models, [
+    { id: "gpt-a", label: "GPT A", isDefault: true },
+    { id: "gpt-b", label: "GPT B", isDefault: false },
+  ]);
+  // Claude Code and the Gemini CLI cannot list models, so the extension keeps its own list.
+  assert.equal((await host.request({ type: "models", provider: "claude" })).result.models, null);
+  assert.equal((await host.request({ type: "models", provider: "gemini" })).result.models, null);
+  assert.equal((await host.request({ type: "models", provider: "copilot" })).error.type, "invalid_request_error");
+});
+
+test("reports why Codex could not list its models", async (t) => {
+  const signedOut = startHost(t, {}, {
+    codex: { command: process.execPath, prefixArgs: [FAKE_CLI, "--fake-models-error"], found: true },
+  });
+  const refused = await signedOut.request({ type: "models", provider: "codex" });
+  assert.equal(refused.ok, false);
+  assert.match(refused.error.message, /Sign in with ChatGPT first/);
+
+  const missing = startHost(t, {}, { codex: { command: "byos-missing-codex", prefixArgs: [], found: false } });
+  const absent = await missing.request({ type: "models", provider: "codex" });
+  assert.match(absent.error.message, /Cannot start Codex.*installed/);
 });
 
 test("reports which providers are installed", async (t) => {

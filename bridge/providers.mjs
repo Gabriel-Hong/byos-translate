@@ -3,6 +3,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { listCodexModels } from "./codex-models.mjs";
 import { RunnerError } from "./process-runner.mjs";
 
 const DEFAULT_SYSTEM_PROMPT = "Respond to the user's request directly.";
@@ -73,6 +74,18 @@ function codexDriver() {
       const text = stdout.trim();
       if (code === 0 && text) return { text, stopReason: "end_turn", usage: {}, model: model || "codex" };
       throw new RunnerError("exited", `Codex exited (code ${code}) without an answer: ${tail(stderr)}`);
+    },
+    // The models depend on the account and change often, so they come from
+    // Codex itself (`codex app-server` model/list) instead of a fixed list.
+    async listModels(tool) {
+      const models = await listCodexModels(tool);
+      return models
+        .filter((entry) => !entry.hidden && (entry.model ?? entry.id))
+        .map((entry) => ({
+          id: entry.model ?? entry.id,
+          label: entry.displayName ?? entry.model ?? entry.id,
+          isDefault: entry.isDefault === true,
+        }));
     },
   };
 }

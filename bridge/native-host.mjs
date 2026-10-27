@@ -4,6 +4,7 @@
 //
 // Requests:  { id, protocol, type: "messages", body }                  Anthropic Messages body plus provider
 //            { id, protocol, type: "warmup", provider, model, system }  start processes ahead of use
+//            { id, protocol, type: "models", provider }                  models offered to the account, or null
 //            { id, protocol, type: "status" }
 // Responses: { id, protocol, ok: true, result } or { id, protocol, ok: false, error: { type, message } }
 //
@@ -20,8 +21,10 @@ import { createDriver, PROVIDER_IDS } from "./providers.mjs";
 import { resolveCommand } from "./resolve-command.mjs";
 
 export const HOST_NAME = "io.github.byos_translate";
-// 1: single-provider native messaging without the field; 2: providers.
-export const PROTOCOL_VERSION = 2;
+// 1: single-provider native messaging without the field; 2: providers; 3: models.
+export const PROTOCOL_VERSION = 3;
+// The account's model list rarely changes within a browsing session.
+const MODEL_LIST_TTL_MS = 10 * 60_000;
 const MAX_INPUT_BYTES = 8 * 1024 * 1024;
 // Chrome rejects host-to-browser messages above 1 MB and closes the port.
 const MAX_OUTPUT_BYTES = 1024 * 1024;
@@ -66,7 +69,24 @@ export function createDecoder(onMessage, onFatal) {
 export function createProviders({ config, commands, runnerOptions = {} }) {
   const drivers = Object.fromEntries(PROVIDER_IDS.map((id) => [id, createDriver(id, { dataDir: config.dataDir })]));
   const runners = new Map();
+  const modelLists = new Map();
   return {
+    // Models the provider's tool reports for the account, or null when the
+    // tool cannot list them. Failed lookups are not cached.
+    async models(provider) {
+      const driver = drivers[provider];
+      if (!driver.listModels) return null;
+      const cached = modelLists.get(provider);
+      if (cached && Date.now() - cached.at < MODEL_LIST_TTL_MS) return cached.models;
+      const models = driver.listModels({
+        command: commands[provider].command,
+        prefixArgs: commands[provider].prefixArgs,
+        cwd: runnerOptions.cwd ?? join(config.dataDir, "empty-cwd"),
+      });
+      modelLists.set(provider, { at: Date.now(), models });
+      models.catch(() => modelLists.delete(provider));
+      return models;
+    },
     defaultModels: Object.fromEntries(PROVIDER_IDS.map((id) => [id, drivers[id].defaultModel])),
     runner(provider) {
       if (!runners.has(provider)) {
@@ -135,6 +155,17 @@ export function serveNativeHost({ input, output, providers, log = () => {} }) {
         if (!key.ok) return send(id, key);
         providers.runner(key.value.provider).warm(key.value);
         return send(id, { ok: true, result: { providers: providers.status() } });
+      }
+      case "models": {
+        if (!Object.hasOwn(defaultModels, message.provider ?? "")) {
+          return send(id, failure("invalid_request_error", `provider must be one of ${Object.keys(defaultModels).join(", ")}.`));
+        }
+        try {
+          return send(id, { ok: true, result: { models: await providers.models(message.provider) } });
+        } catch (error) {
+          log(`${error.kind ?? "error"} listing ${message.provider} models: ${String(error.message).slice(0, 200)}`);
+          return send(id, failure(runnerErrorType(error), error.message));
+        }
       }
       case "messages": {
         const parsed = parseMessagesRequest(message.body, { defaultModels });
