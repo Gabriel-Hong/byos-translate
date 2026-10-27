@@ -95,6 +95,7 @@ parallel at the cost of more processes and memory.
 ```sh
 npm test             # unit and integration tests with a fake claude
 npm run e2e:chrome   # end-to-end in your installed Chrome; needs npm run install-host
+npm run e2e:chrome -- --fallback   # the same with the AI failing, so the browser's translator answers
 npm run try:chrome   # opens a temporary Chrome profile with the extension for manual testing
 ```
 

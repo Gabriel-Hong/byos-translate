@@ -12,7 +12,7 @@
 // for manual testing until it is closed; the temporary profile is then deleted.
 //
 // Usage: npm run install-host   (once)
-//        npm run e2e:chrome [-- <page-url>]
+//        npm run e2e:chrome [-- [<page-url>] [--fallback]]   (--fallback: the browser translates instead of the AI)
 //        npm run try:chrome [-- <page-url>]   (same as --interactive)
 import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -82,6 +82,9 @@ if (!chromePath) {
 
 const args = process.argv.slice(2);
 const interactive = args.includes("--interactive");
+// The AI is made to fail with a model name no provider has, so every block
+// must come from the browser's translator after one click fetches its model.
+const fallback = args.includes("--fallback");
 let fixtureServer;
 let pageUrl = args.find((arg) => !arg.startsWith("--"));
 if (!pageUrl) {
@@ -131,15 +134,33 @@ async function attach(targetId) {
 }
 
 // `duplicates` counts translations identical to their source block, which
-// should be hidden rather than shown twice.
+// should be hidden rather than shown twice. `model` counts blocks waiting for
+// a click to download the browser's translation model, and `machine` the
+// translations the browser's translator made.
 const STATE = `(() => {
   const nodes = [...document.querySelectorAll("byos-tr")];
   const count = (name) => nodes.filter((node) => node.classList.contains(name)).length;
   const normalize = (text) => text.replace(/\\s+/g, " ").trim();
   const duplicates = nodes.filter((node) => node.classList.contains("byos-done") && normalize(node.textContent) ===
     normalize([...node.parentElement.childNodes].filter((child) => child !== node).map((child) => child.textContent).join(""))).length;
-  return { total: nodes.length, loading: count("byos-loading"), done: count("byos-done"), error: count("byos-error"), duplicates };
+  const model = nodes.filter((node) => node.classList.contains("byos-error") && node.textContent.includes("모델이 필요합니다")).length;
+  const machine = nodes.filter((node) => node.classList.contains("byos-done") && node.title.startsWith("브라우저 내장 번역")).length;
+  return { total: nodes.length, loading: count("byos-loading"), done: count("byos-done"), error: count("byos-error"), duplicates, model, machine };
 })()`;
+
+// Clicks the first block that asks for the translation model, as a user would;
+// the browser downloads a model only during a click on the page.
+async function clickModelPrompt(page) {
+  const point = await evaluate(page, `(() => {
+    const node = [...document.querySelectorAll("byos-tr.byos-error")].find((n) => n.textContent.includes("모델이 필요합니다"));
+    node.scrollIntoView({ block: "center" });
+    const rect = node.getBoundingClientRect();
+    return { x: rect.left + Math.min(rect.width / 2, 40), y: rect.top + rect.height / 2 };
+  })()`);
+  for (const type of ["mousePressed", "mouseReleased"]) {
+    await send("Input.dispatchMouseEvent", { type, x: point.x, y: point.y, button: "left", clickCount: 1 }, page);
+  }
+}
 
 // Opens the popup through the toolbar action and presses its toggle button.
 async function pressPopupToggle(extensionId, expectedLabel) {
@@ -189,11 +210,20 @@ async function runScenario(extensionId, targetId) {
 
   const started = Date.now();
   await pressPopupToggle(extensionId, "이 페이지 번역");
-  const first = await waitFor(async () => {
+  const settled = () => waitFor(async () => {
     const state = await evaluate(page, STATE);
     return state.total > 0 && state.loading === 0 ? state : null;
   }, { timeoutMs: 180_000, label: "translations" });
-  console.log(`first screen: ${first.done} translated, ${first.error} failed, ${Date.now() - started} ms`);
+  let first = await settled();
+  if (fallback && first.model > 0) {
+    console.log(`AI failed as intended; ${first.model} blocks ask for the translation model (${Date.now() - started} ms)`);
+    await clickModelPrompt(page);
+    first = await waitFor(async () => {
+      const state = await evaluate(page, STATE);
+      return state.loading === 0 && state.model === 0 ? state : null;
+    }, { timeoutMs: 300_000, label: "model download and translation" });
+  }
+  console.log(`first screen: ${first.done} translated (${first.machine} by the browser), ${first.error} failed, ${Date.now() - started} ms`);
   const sample = await evaluate(page, `[...document.querySelectorAll("byos-tr.byos-done")].slice(0, 5).map((n) => n.textContent.slice(0, 50))`);
   for (const line of sample) console.log(`  ${line}`);
   const screenshot = join(tmpdir(), `byos-e2e-chrome-${Date.now()}.png`);
@@ -205,7 +235,7 @@ async function runScenario(extensionId, targetId) {
     const state = await evaluate(page, STATE);
     return state.total > first.total && state.loading === 0 ? state : null;
   }, { timeoutMs: 120_000, label: "translation after scrolling" }).catch(() => evaluate(page, STATE));
-  console.log(`after scrolling: ${scrolled.done} translated, ${scrolled.error} failed`);
+  console.log(`after scrolling: ${scrolled.done} translated (${scrolled.machine} by the browser), ${scrolled.error} failed`);
 
   await pressPopupToggle(extensionId, "원문만 보기");
   await waitFor(async () => (await evaluate(page, STATE)).total === 0, { label: "translations removed" });
@@ -213,6 +243,10 @@ async function runScenario(extensionId, targetId) {
 
   if (first.error > 0 || scrolled.error > 0) throw new Error("some blocks failed to translate");
   if (first.duplicates > 0 || scrolled.duplicates > 0) throw new Error("some translations repeat their source");
+  if (fallback && (first.machine !== first.done || scrolled.machine !== scrolled.done)) {
+    throw new Error("some translations did not come from the browser's translator");
+  }
+  if (!fallback && (first.machine > 0 || scrolled.machine > 0)) throw new Error("the AI did not answer some blocks");
   console.log("PASS");
 }
 
@@ -224,10 +258,18 @@ try {
   if (extensionId !== expectedExtensionId) {
     throw new Error(`extension ID ${extensionId} differs from the manifest key's ${expectedExtensionId}`);
   }
-  await findTarget(
+  const worker = await findTarget(
     (target) => target.type === "service_worker" && target.url.startsWith(`chrome-extension://${extensionId}/`),
     "extension service worker",
   );
+  if (fallback) {
+    // Extensions.setStorageItems needs a session attached to the extension.
+    await send("Extensions.setStorageItems", {
+      id: extensionId,
+      storageArea: "local",
+      values: { provider: "claude", models: { claude: "byos-e2e-unavailable" } },
+    }, await attach(worker.targetId));
+  }
   const { targetId } = await send("Target.createTarget", { url: pageUrl });
 
   if (interactive) {
