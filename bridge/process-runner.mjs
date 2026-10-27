@@ -208,7 +208,6 @@ export class ProcessRunner {
         this.#stats.coldStarts++;
         proc = this.#spawn(model, system, key);
       }
-      this.#replenish(model, system, key);
       const completion = await proc.run(this.driver.input(prompt, system), {
         signal,
         timeoutMs: this.options.requestTimeoutMs,
@@ -221,6 +220,9 @@ export class ProcessRunner {
     } finally {
       proc?.retire();
       this.#release();
+      // Refilling only after the answer keeps replacement processes from
+      // competing for CPU with the processes still starting for this burst.
+      this.#replenish(model, system, key);
     }
   }
 
