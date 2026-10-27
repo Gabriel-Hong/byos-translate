@@ -56,6 +56,11 @@ Optional settings (`config.json`) and the bridge log (`native-host.log`) are in 
 - Pick the engine (Claude, OpenAI or Google), model and target language in the popup. Claude's choices always
   point to the newest model of each family, Codex lists the models your ChatGPT plan offers, and "직접 입력…"
   takes any other model name.
+- When the AI can't answer (bridge not installed, CLI missing or signed out, usage limit reached), the browser's
+  built-in translator fills in: Google's model in Chrome and Microsoft's in Edge, running on your device. The first
+  time, click a block marked "모델이 필요합니다" to download the language model (English↔Korean took about 13 s in
+  Chrome 156 and about 50 s in Edge 156). Hover over a translation to see which one made it; turn the fallback off
+  in Options.
 - The UI is in Korean for now.
 
 ## Performance

@@ -41,6 +41,12 @@ select {
   font: inherit;
 }
 
+label.check input {
+  display: inline;
+  width: auto;
+  margin: 0 6px 0 0;
+}
+
 fieldset {
   border: 1px solid rgba(127, 127, 127, 0.35);
   border-radius: 6px;

@@ -38,6 +38,8 @@ export const DEFAULT_SETTINGS = {
   displayStyle: "dashed",
   maxSegmentsPerRequest: 8,
   maxCharsPerRequest: 3000,
+  // When the AI cannot answer, the browser's on-device translator fills in.
+  machineFallback: true,
 };
 
 // Settings of earlier versions: the HTTP bridge and a single Claude model.

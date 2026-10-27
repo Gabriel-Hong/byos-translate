@@ -12,8 +12,14 @@ const VERSION_MISMATCH =
   "repo 폴더를 옮겼거나 여러 개라면 'npm run install-host'도 다시 실행하세요.";
 // Closing the idle port lets the bridge and its provider processes exit.
 const HOST_IDLE_MS = 10 * 60_000;
+// After the AI fails, pages go straight to the browser's translator for this
+// long, so a missing or signed-out CLI is not started for every batch.
+const AI_RETRY_MS = 60_000;
 
 class BridgeError extends Error {}
+
+// { until, message } while the AI is skipped in favour of the browser's translator.
+let aiDown = null;
 
 // Translations live only in this worker's memory; the browser may discard them
 // when it stops an idle service worker.
@@ -148,9 +154,15 @@ async function translateBatch(settings, texts, pageTitle) {
 
 // Translates one batch chosen by the content script. Cached segments are
 // answered locally; segments the model skipped are retried once on their own.
+// With machineFallback, `fallback` tells the content script to translate the
+// segments left null with the browser's translator.
 async function translateTexts(texts, pageTitle) {
   const settings = await loadSettings();
+  const fallback = settings.machineFallback;
   const results = texts.map((text) => cacheGet(cacheKey(settings, text)) ?? null);
+  if (fallback && aiDown && Date.now() < aiDown.until) {
+    return { translations: results, error: aiDown.message, fallback };
+  }
   const store = (indexes, translations) => {
     const missing = [];
     translations.forEach((translation, position) => {
@@ -176,10 +188,11 @@ async function translateTexts(texts, pageTitle) {
       error = retries.find((outcome) => outcome.status === "rejected")?.reason ?? null;
     } catch (caught) {
       error = caught;
+      if (fallback) aiDown = { until: Date.now() + AI_RETRY_MS, message: String(caught.message ?? caught) };
     }
   }
   if (!error && results.includes(null)) error = new BridgeError("모델이 일부 문단에 답하지 않았습니다.");
-  return { translations: results, error: error ? String(error.message ?? error) : null };
+  return { translations: results, error: error ? String(error.message ?? error) : null, fallback };
 }
 
 // Reports whether the chosen provider's tool is installed and, for Claude Code,
@@ -197,12 +210,17 @@ async function checkBridge() {
     });
     const provider = status.providers[settings.provider];
     if (!provider.available) {
-      return { ok: false, message: `${label}를 찾을 수 없습니다. 설치하고 로그인한 뒤 브라우저를 다시 시작하세요.` };
+      return {
+        ok: false,
+        message: `${label}를 찾을 수 없습니다. 설치하고 로그인한 뒤 브라우저를 다시 시작하세요.`,
+        machineFallback: settings.machineFallback,
+      };
     }
+    aiDown = null;
     const warm = provider.idle ? ` · 대기 프로세스 ${provider.idle}개` : "";
     return { ok: true, message: `연결됨 · ${label}${warm}` };
   } catch (error) {
-    return { ok: false, message: error.message };
+    return { ok: false, message: error.message, machineFallback: settings.machineFallback };
   }
 }
 
@@ -258,6 +276,7 @@ async function pageSettings() {
 
 chrome.storage.onChanged.addListener(async (changes, area) => {
   if (area !== "local") return;
+  if ("provider" in changes || "models" in changes) aiDown = null;
   const relevant = ["provider", "models", "targetLang", "displayStyle", "maxSegmentsPerRequest", "maxCharsPerRequest"];
   if (!relevant.some((key) => key in changes)) return;
   const settings = await pageSettings();

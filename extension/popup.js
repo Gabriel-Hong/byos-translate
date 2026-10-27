@@ -25,6 +25,7 @@ async function showBridgeStatus() {
   const check = await chrome.runtime.sendMessage({ type: "byos:check" });
   $("bridge").textContent = `● ${check.message}`;
   $("bridge").className = `status ${check.ok ? "ok" : "bad"}`;
+  $("fallbackNote").hidden = check.ok || !check.machineFallback;
 }
 
 async function init() {

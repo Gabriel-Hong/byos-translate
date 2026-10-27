@@ -30,6 +30,7 @@
   };
   const LETTER = /\p{L}/u;
   const LETTERS = /\p{L}/gu;
+  const MODEL_NEEDED = "⚠ 브라우저 내장 번역 모델이 필요합니다 · 클릭해서 받기(처음 한 번)";
 
   let settings = null;
   let enabled = false;
@@ -210,6 +211,76 @@
     if (batch.length > 0) translateBatch(batch);
   }
 
+  // The browser's on-device translator (Google's model in Chrome, Microsoft's
+  // in Edge) fills in when the AI cannot answer. The browser downloads a
+  // language model only while the page has a click, so a missing model is
+  // reported as `model` and fetched by downloadModel from a click.
+  let detector = null;
+  const translators = new Map();
+
+  function machineLanguage(tag) {
+    const lower = String(tag).toLowerCase();
+    if (lower.startsWith("zh")) return /hant|tw|hk|mo/.test(lower) ? "zh-Hant" : "zh";
+    return lower.split("-")[0];
+  }
+
+  async function sourceLanguage(text) {
+    try {
+      detector ??= LanguageDetector.create();
+      const [best] = await (await detector).detect(text);
+      if (best && best.detectedLanguage !== "und" && best.confidence >= 0.5) return machineLanguage(best.detectedLanguage);
+    } catch {
+      detector = null;
+    }
+    return machineLanguage(document.documentElement.lang || "en");
+  }
+
+  function translatorFor(pair) {
+    const key = `${pair.sourceLanguage}>${pair.targetLanguage}`;
+    if (!translators.has(key)) {
+      const pending = Translator.availability(pair).then((availability) => {
+        if (availability === "unavailable") {
+          throw new Error(`브라우저 내장 번역이 ${pair.sourceLanguage} → ${pair.targetLanguage}를 지원하지 않습니다.`);
+        }
+        if (availability !== "available") throw Object.assign(new Error(MODEL_NEEDED), { model: pair });
+        return Translator.create(pair);
+      });
+      translators.set(key, pending);
+      pending.catch(() => translators.delete(key));
+    }
+    return translators.get(key);
+  }
+
+  // Must run inside a click on the page.
+  function downloadModel(pair, onProgress) {
+    const key = `${pair.sourceLanguage}>${pair.targetLanguage}`;
+    const pending = Translator.create({
+      ...pair,
+      monitor: (monitor) => monitor.addEventListener("downloadprogress", (event) => onProgress(event.loaded)),
+    });
+    translators.set(key, pending);
+    pending.catch(() => translators.delete(key));
+    return pending;
+  }
+
+  // Resolves one { text } or { error } per input.
+  async function machineTranslate(texts) {
+    if (typeof Translator === "undefined") {
+      const error = new Error("이 브라우저에는 내장 번역이 없습니다(Chrome 138 이상 또는 최신 Edge 필요).");
+      return texts.map(() => ({ error }));
+    }
+    const targetLanguage = machineLanguage(settings.targetLang);
+    return Promise.all(texts.map(async (text) => {
+      try {
+        const source = await sourceLanguage(text);
+        if (source === targetLanguage) return { text };
+        return { text: await (await translatorFor({ sourceLanguage: source, targetLanguage })).translate(text) };
+      } catch (error) {
+        return { error };
+      }
+    }));
+  }
+
   async function translateBatch(batch) {
     const started = generation;
     for (const record of batch) render(record, "loading", "");
@@ -223,19 +294,31 @@
     } catch (error) {
       response = { error: String(error?.message ?? error) };
     }
+    const translations = batch.map((_, index) => response?.translations?.[index] ?? null);
+    const machine = new Map();
+    if (response?.fallback) {
+      const missing = translations.flatMap((translation, index) => (translation === null ? [index] : []));
+      const results = await machineTranslate(missing.map((index) => batch[index].sendText));
+      missing.forEach((index, position) => machine.set(index, results[position]));
+    }
     if (started !== generation) return;
     batch.forEach((record, index) => {
       if (records.get(record.container) !== record) return;
-      const translation = response?.translations?.[index];
+      const fallback = machine.get(index);
+      const translation = translations[index] ?? fallback?.text;
+      record.model = fallback?.error?.model ?? null;
       if (translation && sameText(translation, record.sendText)) {
         // Code, names and token fragments come back unchanged; showing them
         // again would only duplicate the source.
         removeTranslation(record);
         record.state = "same";
       } else if (translation) {
-        render(record, "done", translation);
+        render(record, "done", translation, fallback ? `브라우저 내장 번역 · AI: ${response.error}` : null);
+      } else if (record.model) {
+        render(record, "error", MODEL_NEEDED, `AI: ${response.error}`);
       } else {
-        render(record, "error", "⚠ 번역 실패 · 클릭해서 다시 시도", response?.error ?? "알 수 없는 오류");
+        const reasons = [response?.error ?? "알 수 없는 오류", fallback?.error && `내장 번역: ${fallback.error.message}`];
+        render(record, "error", "⚠ 번역 실패 · 클릭해서 다시 시도", reasons.filter(Boolean).join("\n"));
       }
     });
   }
@@ -287,7 +370,25 @@
     if (!record) return;
     event.preventDefault();
     event.stopPropagation();
-    enqueue(record);
+    if (!record.model) {
+      enqueue(record);
+      return;
+    }
+    // Blocks waiting for the same model are translated again once it is in.
+    const { sourceLanguage, targetLanguage } = record.model;
+    const waiting = [...translated].filter((candidate) => candidate.state === "error" &&
+      candidate.model?.sourceLanguage === sourceLanguage && candidate.model?.targetLanguage === targetLanguage);
+    for (const candidate of waiting) render(candidate, "loading", "");
+    const progress = (loaded) => {
+      if (record.state === "loading") record.node.textContent = ` 내장 번역 모델 받는 중… ${Math.round(loaded * 100)}%`;
+    };
+    progress(0);
+    downloadModel(record.model, progress).catch(() => {}).finally(() => {
+      for (const candidate of waiting) {
+        candidate.state = "error";
+        enqueue(candidate);
+      }
+    });
   }
 
   function applyStyle() {

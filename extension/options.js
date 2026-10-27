@@ -5,11 +5,13 @@ import { DISPLAY_STYLES, loadSettings } from "./settings.js";
 const $ = (id) => document.getElementById(id);
 const TEXT_FIELDS = ["targetLang", "displayStyle"];
 const NUMBER_FIELDS = ["maxSegmentsPerRequest", "maxCharsPerRequest"];
+const CHECK_FIELDS = ["machineFallback"];
 
 function readForm() {
   const values = {};
   for (const id of TEXT_FIELDS) values[id] = $(id).value.trim();
   for (const id of NUMBER_FIELDS) values[id] = Number($(id).value);
+  for (const id of CHECK_FIELDS) values[id] = $(id).checked;
   return values;
 }
 
@@ -18,6 +20,7 @@ async function init() {
   for (const [code, name] of Object.entries(LANGUAGES)) $("targetLang").add(new Option(`${name} (${code})`, code));
   for (const [value, label] of Object.entries(DISPLAY_STYLES)) $("displayStyle").add(new Option(label, value));
   for (const id of [...TEXT_FIELDS, ...NUMBER_FIELDS]) $(id).value = settings[id];
+  for (const id of CHECK_FIELDS) $(id).checked = settings[id];
 
   const check = async () => {
     $("checkResult").textContent = "확인 중…";

@@ -36,6 +36,12 @@
       <label>요청당 최대 글자 수
         <input id="maxCharsPerRequest" type="number" min="200" max="20000" step="100" required>
       </label>
+      <label class="check">
+        <input id="machineFallback" type="checkbox">
+        AI에 연결할 수 없으면 브라우저 내장 번역으로 번역
+      </label>
+      <p class="hint">브라우저가 PC 안에서 번역합니다(Chrome은 Google, Edge는 Microsoft 모델). 처음에는 번역 실패 표시를
+        한 번 클릭해 언어 모델을 받아야 합니다.</p>
     </fieldset>
     <button type="submit" class="primary">저장</button>
     <span id="saved" class="status"></span>
