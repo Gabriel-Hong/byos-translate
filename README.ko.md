@@ -93,6 +93,7 @@ Windows 11, Claude Code 2.1.310, Haiku에서 측정(Codex와 Gemini CLI는 요�
 npm test             # 가짜 claude를 쓰는 단위·통합 테스트
 npm run e2e:chrome   # 설치된 Chrome으로 실제 번역 E2E, npm run install-host 필요
 npm run e2e:chrome -- --fallback   # AI가 실패하게 해서 브라우저 내장 번역으로 E2E
+npm run e2e:chrome -- --lang=en   # Chrome UI를 영어로 바꿔 영어 메뉴로 E2E(Windows, Linux)
 npm run try:chrome   # 확장을 넣은 임시 프로필 Chrome을 열어 직접 테스트
 ```
 

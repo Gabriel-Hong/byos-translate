@@ -12,8 +12,10 @@
 // for manual testing until it is closed; the temporary profile is then deleted.
 //
 // Usage: npm run install-host   (once)
-//        npm run e2e:chrome [-- [<page-url>] [--fallback]]   (--fallback: the browser translates instead of the AI)
-//        npm run try:chrome [-- <page-url>]   (same as --interactive)
+//        npm run e2e:chrome [-- [<page-url>] [--fallback] [--lang=<code>]]
+//          --fallback: the browser translates instead of the AI
+//          --lang: Chrome's UI language, which the extension's menus follow (Windows and Linux)
+//        npm run try:chrome [-- <page-url>] [--lang=<code>]   (same as --interactive)
 import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
@@ -85,6 +87,7 @@ const interactive = args.includes("--interactive");
 // The AI is made to fail with a model name no provider has, so every block
 // must come from the browser's translator after one click fetches its model.
 const fallback = args.includes("--fallback");
+const lang = args.filter((arg) => arg.startsWith("--lang="));
 let fixtureServer;
 let pageUrl = args.find((arg) => !arg.startsWith("--"));
 if (!pageUrl) {
@@ -108,6 +111,7 @@ const child = spawn(chromePath, [
   "--no-default-browser-check",
   "--disable-search-engine-choice-screen",
   "--window-size=1200,950",
+  ...lang,
   "about:blank",
 ], { stdio: ["ignore", "ignore", "ignore", "pipe", "pipe"] });
 const exited = new Promise((resolve) => child.once("exit", resolve));
@@ -133,18 +137,22 @@ async function attach(targetId) {
   return (await send("Target.attachToTarget", { targetId, flatten: true })).sessionId;
 }
 
+// The extension's text in the browser's UI language, read in the popup the
+// first time it opens.
+let ui = null;
+
 // `duplicates` counts translations identical to their source block, which
 // should be hidden rather than shown twice. `model` counts blocks waiting for
 // a click to download the browser's translation model, and `machine` the
 // translations the browser's translator made.
-const STATE = `(() => {
+const pageState = () => `(() => {
   const nodes = [...document.querySelectorAll("byos-tr")];
   const count = (name) => nodes.filter((node) => node.classList.contains(name)).length;
   const normalize = (text) => text.replace(/\\s+/g, " ").trim();
   const duplicates = nodes.filter((node) => node.classList.contains("byos-done") && normalize(node.textContent) ===
     normalize([...node.parentElement.childNodes].filter((child) => child !== node).map((child) => child.textContent).join(""))).length;
-  const model = nodes.filter((node) => node.classList.contains("byos-error") && node.textContent.includes("모델이 필요합니다")).length;
-  const machine = nodes.filter((node) => node.classList.contains("byos-done") && node.title.startsWith("브라우저 내장 번역")).length;
+  const model = nodes.filter((node) => node.classList.contains("byos-error") && node.textContent === ${JSON.stringify(ui.modelNeeded)}).length;
+  const machine = nodes.filter((node) => node.classList.contains("byos-done") && node.title.startsWith(${JSON.stringify(ui.browserTranslator)})).length;
   return { total: nodes.length, loading: count("byos-loading"), done: count("byos-done"), error: count("byos-error"), duplicates, model, machine };
 })()`;
 
@@ -152,7 +160,7 @@ const STATE = `(() => {
 // the browser downloads a model only during a click on the page.
 async function clickModelPrompt(page) {
   const point = await evaluate(page, `(() => {
-    const node = [...document.querySelectorAll("byos-tr.byos-error")].find((n) => n.textContent.includes("모델이 필요합니다"));
+    const node = [...document.querySelectorAll("byos-tr.byos-error")].find((n) => n.textContent === ${JSON.stringify(ui.modelNeeded)});
     node.scrollIntoView({ block: "center" });
     const rect = node.getBoundingClientRect();
     return { x: rect.left + Math.min(rect.width / 2, 40), y: rect.top + rect.height / 2 };
@@ -162,8 +170,9 @@ async function clickModelPrompt(page) {
   }
 }
 
-// Opens the popup through the toolbar action and presses its toggle button.
-async function pressPopupToggle(extensionId, expectedLabel) {
+// Opens the popup through the toolbar action and presses its toggle button,
+// which must show the message `expectedKey`.
+async function pressPopupToggle(extensionId, expectedKey) {
   const { targetInfos } = await send("Target.getTargets", { filter: [{ type: "tab" }] });
   const tab = targetInfos.find((target) => target.url === pageUrl);
   if (!tab) throw new Error(`no tab target for ${pageUrl}`);
@@ -174,18 +183,24 @@ async function pressPopupToggle(extensionId, expectedLabel) {
   const ready = await waitFor(
     () => evaluate(session, `(async () => {
       const status = document.getElementById("bridge")?.textContent;
-      if (!status || status.includes("확인 중")) return null;
+      if (!status || status === chrome.i18n.getMessage("checkingBridge")) return null;
       const tabs = await chrome.tabs.query({ currentWindow: true });
       return {
         label: document.getElementById("toggle").textContent,
+        expected: chrome.i18n.getMessage(${JSON.stringify(expectedKey)}),
+        ui: {
+          modelNeeded: chrome.i18n.getMessage("modelNeeded"),
+          browserTranslator: chrome.i18n.getMessage("browserTranslator"),
+        },
         status,
         tabs: tabs.map((t) => (t.active ? "*" : "") + t.id + ":" + (t.url ?? "(no access)")).join(" "),
       };
     })()`).catch(() => null),
     { label: "popup" },
   );
+  ui ??= ready.ui;
   console.log(`popup: "${ready.label}" | ${ready.status} | tabs ${ready.tabs}`);
-  if (ready.label !== expectedLabel) throw new Error(`popup button says "${ready.label}", expected "${expectedLabel}"`);
+  if (ready.label !== ready.expected) throw new Error(`popup button says "${ready.label}", expected "${ready.expected}"`);
   await evaluate(session, `document.getElementById("toggle").click(), true`).catch(() => {});
   await sleep(500);
   const popupError = await evaluate(session, `document.getElementById("pageError").hidden ? "" : document.getElementById("pageError").textContent`)
@@ -209,9 +224,9 @@ async function runScenario(extensionId, targetId) {
   await sleep(300);
 
   const started = Date.now();
-  await pressPopupToggle(extensionId, "이 페이지 번역");
+  await pressPopupToggle(extensionId, "translatePage");
   const settled = () => waitFor(async () => {
-    const state = await evaluate(page, STATE);
+    const state = await evaluate(page, pageState());
     return state.total > 0 && state.loading === 0 ? state : null;
   }, { timeoutMs: 180_000, label: "translations" });
   let first = await settled();
@@ -219,7 +234,7 @@ async function runScenario(extensionId, targetId) {
     console.log(`AI failed as intended; ${first.model} blocks ask for the translation model (${Date.now() - started} ms)`);
     await clickModelPrompt(page);
     first = await waitFor(async () => {
-      const state = await evaluate(page, STATE);
+      const state = await evaluate(page, pageState());
       return state.loading === 0 && state.model === 0 ? state : null;
     }, { timeoutMs: 300_000, label: "model download and translation" });
   }
@@ -232,13 +247,13 @@ async function runScenario(extensionId, targetId) {
 
   await evaluate(page, `window.scrollBy(0, 2500), true`);
   const scrolled = await waitFor(async () => {
-    const state = await evaluate(page, STATE);
+    const state = await evaluate(page, pageState());
     return state.total > first.total && state.loading === 0 ? state : null;
-  }, { timeoutMs: 120_000, label: "translation after scrolling" }).catch(() => evaluate(page, STATE));
+  }, { timeoutMs: 120_000, label: "translation after scrolling" }).catch(() => evaluate(page, pageState()));
   console.log(`after scrolling: ${scrolled.done} translated (${scrolled.machine} by the browser), ${scrolled.error} failed`);
 
-  await pressPopupToggle(extensionId, "원문만 보기");
-  await waitFor(async () => (await evaluate(page, STATE)).total === 0, { label: "translations removed" });
+  await pressPopupToggle(extensionId, "showOriginal");
+  await waitFor(async () => (await evaluate(page, pageState())).total === 0, { label: "translations removed" });
   console.log("toggle off: all translations removed");
 
   if (first.error > 0 || scrolled.error > 0) throw new Error("some blocks failed to translate");
@@ -262,19 +277,20 @@ try {
     (target) => target.type === "service_worker" && target.url.startsWith(`chrome-extension://${extensionId}/`),
     "extension service worker",
   );
-  if (fallback) {
+  const values = {
+    // The checks expect Korean translations, whatever language the menus use.
+    ...(!interactive && { targetLang: "ko" }),
+    ...(fallback && { provider: "claude", models: { claude: "byos-e2e-unavailable" } }),
+  };
+  if (Object.keys(values).length > 0) {
     // Extensions.setStorageItems needs a session attached to the extension.
-    await send("Extensions.setStorageItems", {
-      id: extensionId,
-      storageArea: "local",
-      values: { provider: "claude", models: { claude: "byos-e2e-unavailable" } },
-    }, await attach(worker.targetId));
+    await send("Extensions.setStorageItems", { id: extensionId, storageArea: "local", values }, await attach(worker.targetId));
   }
   const { targetId } = await send("Target.createTarget", { url: pageUrl });
 
   if (interactive) {
     console.log(`Chrome is open with BYOS Translate on ${pageUrl}`);
-    console.log("Use Alt+Q, the puzzle-piece menu, or right-click > BYOS Translate 켜기/끄기.");
+    console.log("Use Alt+Q, the puzzle-piece menu, or the right-click menu.");
     console.log("Close the Chrome window (or press Ctrl+C here) to finish; the temporary profile is then deleted.");
     await Promise.race([exited, new Promise((resolve) => process.once("SIGINT", resolve))]);
   } else {
