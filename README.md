@@ -5,7 +5,7 @@ subscription you already pay for (Claude, ChatGPT or Gemini) instead of a paid t
 
 [한국어](README.ko.md)
 
-![A page with each paragraph followed by its Korean translation](docs/screenshot.png)
+![A page with each paragraph followed by its Korean translation, and the extension's popup in English](docs/screenshot-en.png)
 
 The extension sends the paragraphs on screen to a local bridge, which the browser starts on demand through
 native messaging. The bridge runs the provider's official command-line tool with your own sign-in, and each
