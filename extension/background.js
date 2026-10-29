@@ -1,3 +1,4 @@
+import { t } from "./i18n.js";
 import { buildSystemPrompt, buildUserPrompt, parseBatchResponse } from "./protocol.js";
 import { loadSettings, OBSOLETE_SETTINGS, PROVIDERS, translationKey } from "./settings.js";
 
@@ -7,9 +8,7 @@ const MENU_ID = "byos-toggle";
 // Must match HOST_NAME and PROTOCOL_VERSION in bridge/native-host.mjs.
 const HOST_NAME = "io.github.byos_translate";
 const PROTOCOL_VERSION = 3;
-const VERSION_MISMATCH =
-  "브리지와 확장의 버전이 다릅니다. chrome://extensions에서 BYOS Translate를 새로 고치거나 브라우저를 다시 시작하세요. " +
-  "repo 폴더를 옮겼거나 여러 개라면 'npm run install-host'도 다시 실행하세요.";
+const VERSION_MISMATCH = t("versionMismatch");
 // Closing the idle port lets the bridge and its provider processes exit.
 const HOST_IDLE_MS = 10 * 60_000;
 // After the AI fails, pages go straight to the browser's translator for this
@@ -64,13 +63,9 @@ let idleTimer = null;
 const pendingRequests = new Map();
 
 function hostErrorMessage(detail) {
-  if (/not found/i.test(detail)) {
-    return "브리지가 설치되지 않았습니다. repo 폴더에서 'npm run install-host'를 실행하세요.";
-  }
-  if (/forbidden/i.test(detail)) {
-    return "이 확장이 브리지에 등록되지 않았습니다. 'npm run install-host'를 다시 실행하세요.";
-  }
-  return `브리지와 통신하지 못했습니다(${detail}). 데이터 폴더의 native-host.log를 확인하세요.`;
+  if (/not found/i.test(detail)) return t("bridgeNotInstalled");
+  if (/forbidden/i.test(detail)) return t("extensionNotRegistered");
+  return t("bridgeUnreachable", detail);
 }
 
 function hostPort() {
@@ -84,7 +79,7 @@ function hostPort() {
     scheduleIdleDisconnect();
   });
   opened.onDisconnect.addListener(() => {
-    const error = new BridgeError(hostErrorMessage(chrome.runtime.lastError?.message ?? "연결이 끊겼습니다"));
+    const error = new BridgeError(hostErrorMessage(chrome.runtime.lastError?.message ?? t("disconnected")));
     if (port === opened) port = null;
     clearTimeout(idleTimer);
     for (const request of pendingRequests.values()) request.reject(error);
@@ -132,7 +127,7 @@ async function callHost(message) {
     dropPort(error);
     throw error;
   }
-  if (!reply.ok) throw new BridgeError(`브리지 오류: ${reply.error?.message ?? "알 수 없는 오류"}`);
+  if (!reply.ok) throw new BridgeError(t("bridgeError", reply.error?.message ?? t("unknownError")));
   return reply.result;
 }
 
@@ -191,7 +186,7 @@ async function translateTexts(texts, pageTitle) {
       if (fallback) aiDown = { until: Date.now() + AI_RETRY_MS, message: String(caught.message ?? caught) };
     }
   }
-  if (!error && results.includes(null)) error = new BridgeError("모델이 일부 문단에 답하지 않았습니다.");
+  if (!error && results.includes(null)) error = new BridgeError(t("segmentsUnanswered"));
   return { translations: results, error: error ? String(error.message ?? error) : null, fallback };
 }
 
@@ -212,13 +207,13 @@ async function checkBridge() {
     if (!provider.available) {
       return {
         ok: false,
-        message: `${label}를 찾을 수 없습니다. 설치하고 로그인한 뒤 브라우저를 다시 시작하세요.`,
+        message: t("providerNotFound", label),
         machineFallback: settings.machineFallback,
       };
     }
     aiDown = null;
-    const warm = provider.idle ? ` · 대기 프로세스 ${provider.idle}개` : "";
-    return { ok: true, message: `연결됨 · ${label}${warm}` };
+    const warm = provider.idle ? ` · ${t("prestartedProcesses", provider.idle)}` : "";
+    return { ok: true, message: `${t("connected", label)}${warm}` };
   } catch (error) {
     return { ok: false, message: error.message, machineFallback: settings.machineFallback };
   }
@@ -254,7 +249,7 @@ chrome.runtime.onInstalled.addListener(() => {
   chrome.storage.local.remove(OBSOLETE_SETTINGS);
   chrome.contextMenus.create({
     id: MENU_ID,
-    title: "BYOS Translate 켜기/끄기",
+    title: t("toggleMenu"),
     contexts: ["page", "selection", "link"],
   });
 });

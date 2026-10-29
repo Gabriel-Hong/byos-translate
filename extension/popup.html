@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ko">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <title>BYOS Translate</title>
@@ -7,21 +7,21 @@
 </head>
 <body class="popup">
   <h1>BYOS Translate</h1>
-  <p id="bridge" class="status">브리지 확인 중…</p>
-  <p id="fallbackNote" class="hint" hidden>AI 대신 브라우저 내장 번역으로 번역합니다.</p>
-  <button id="toggle" type="button" class="primary">이 페이지 번역</button>
+  <p id="bridge" class="status" data-i18n="checkingBridge"></p>
+  <p id="fallbackNote" class="hint" data-i18n="machineFallbackNote" hidden></p>
+  <button id="toggle" type="button" class="primary" data-i18n="translatePage"></button>
   <p id="pageError" class="error" hidden></p>
-  <label>번역할 언어
+  <label><span data-i18n="targetLanguage"></span>
     <select id="targetLang"></select>
   </label>
-  <label>번역 엔진
+  <label><span data-i18n="translationEngine"></span>
     <select id="provider"></select>
   </label>
-  <label>모델
+  <label><span data-i18n="model"></span>
     <select id="model"></select>
-    <input id="customModel" type="text" placeholder="모델 이름" autocomplete="off" spellcheck="false" hidden>
+    <input id="customModel" type="text" data-i18n-placeholder="modelName" autocomplete="off" spellcheck="false" hidden>
   </label>
-  <p class="hint">단축키 <kbd>Alt+Q</kbd> · <a href="#" id="openOptions">옵션</a></p>
+  <p class="hint"><span data-i18n="shortcut"></span> <kbd>Alt+Q</kbd> · <a href="#" id="openOptions" data-i18n="options"></a></p>
   <script type="module" src="popup.js"></script>
 </body>
 </html>

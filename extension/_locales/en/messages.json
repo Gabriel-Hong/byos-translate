@@ -1,0 +1,102 @@
+{
+  "languageTag": { "message": "en", "description": "BCP 47 tag of this translation, set as the pages' lang attribute." },
+  "extensionDescription": {
+    "message": "Bilingual web page translation with the AI subscription you already have (Claude, ChatGPT or Gemini)."
+  },
+  "toggleCommand": { "message": "Turn translation on or off for this page" },
+  "toggleMenu": { "message": "Turn BYOS Translate on/off" },
+
+  "checkingBridge": { "message": "Checking the bridge…" },
+  "machineFallbackNote": { "message": "Translating with the browser's built-in translator instead of the AI." },
+  "translatePage": { "message": "Translate this page" },
+  "showOriginal": { "message": "Show original only" },
+  "cannotRunHere": {
+    "message": "Can't run on this page: $ERROR$",
+    "placeholders": { "error": { "content": "$1" } }
+  },
+  "targetLanguage": { "message": "Translate into" },
+  "translationEngine": { "message": "Translation engine" },
+  "engine": { "message": "Engine" },
+  "model": { "message": "Model" },
+  "modelName": { "message": "Model name" },
+  "shortcut": { "message": "Shortcut" },
+  "options": { "message": "Options" },
+
+  "optionsTitle": { "message": "BYOS Translate Options" },
+  "savedImmediately": { "message": "(saved immediately)" },
+  "installHint": {
+    "message": "Run npm run install-host once in the repo folder. The chosen engine's CLI must be installed and signed in.",
+    "description": "Keep \"npm run install-host\" as is; it is shown as code."
+  },
+  "testConnection": { "message": "Test connection" },
+  "checking": { "message": "Checking…" },
+  "translationSection": { "message": "Translation" },
+  "displayStyle": { "message": "Display style" },
+  "maxSegments": { "message": "Max paragraphs per request" },
+  "maxChars": { "message": "Max characters per request" },
+  "machineFallbackOption": { "message": "Use the browser's built-in translator when the AI can't be reached" },
+  "machineFallbackHint": {
+    "message": "The browser translates on your device (Google's model in Chrome, Microsoft's in Edge). The first time, click a failed translation once to download the language model."
+  },
+  "save": { "message": "Save" },
+  "saved": { "message": "Saved." },
+
+  "displayDashed": { "message": "Dashed underline" },
+  "displayPlain": { "message": "Plain" },
+  "displayFaded": { "message": "Faded" },
+  "displayHighlight": { "message": "Highlighted" },
+
+  "modelLatest": { "message": "latest" },
+  "modelLatestFast": { "message": "latest, fast" },
+  "modelFast": { "message": "fast" },
+  "modelPreview": { "message": "preview" },
+  "modelDefault": { "message": "default" },
+  "codexDefaultModel": { "message": "Codex default model" },
+  "customModel": { "message": "Custom…" },
+
+  "versionMismatch": {
+    "message": "The bridge and the extension versions differ. Reload BYOS Translate in chrome://extensions or restart the browser. If you moved the repo folder or have more than one, run 'npm run install-host' again."
+  },
+  "bridgeNotInstalled": { "message": "The bridge is not installed. Run 'npm run install-host' in the repo folder." },
+  "extensionNotRegistered": {
+    "message": "This extension is not registered with the bridge. Run 'npm run install-host' again."
+  },
+  "bridgeUnreachable": {
+    "message": "Couldn't talk to the bridge ($DETAIL$). Check native-host.log in the data folder.",
+    "placeholders": { "detail": { "content": "$1" } }
+  },
+  "disconnected": { "message": "disconnected" },
+  "bridgeError": {
+    "message": "Bridge error: $DETAIL$",
+    "placeholders": { "detail": { "content": "$1" } }
+  },
+  "unknownError": { "message": "unknown error" },
+  "segmentsUnanswered": { "message": "The model didn't answer some paragraphs." },
+  "providerNotFound": {
+    "message": "$PROVIDER$ was not found. Install it, sign in, then restart the browser.",
+    "placeholders": { "provider": { "content": "$1" } }
+  },
+  "connected": {
+    "message": "Connected · $PROVIDER$",
+    "placeholders": { "provider": { "content": "$1" } }
+  },
+  "prestartedProcesses": {
+    "message": "pre-started processes: $COUNT$",
+    "placeholders": { "count": { "content": "$1" } }
+  },
+
+  "modelNeeded": { "message": "⚠ The browser's translation model is needed · Click to download (first time only)" },
+  "machinePairUnsupported": {
+    "message": "The browser's built-in translator doesn't support $SOURCE$ → $TARGET$.",
+    "placeholders": { "source": { "content": "$1" }, "target": { "content": "$2" } }
+  },
+  "noMachineTranslator": {
+    "message": "This browser has no built-in translator (Chrome 138 or later, or a recent Edge, is needed)."
+  },
+  "browserTranslator": { "message": "Browser's built-in translator" },
+  "translationFailed": { "message": "⚠ Translation failed · Click to try again" },
+  "downloadingModel": {
+    "message": "Downloading the translation model… $PERCENT$%",
+    "placeholders": { "percent": { "content": "$1" } }
+  }
+}

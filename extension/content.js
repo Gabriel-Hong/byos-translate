@@ -30,7 +30,9 @@
   };
   const LETTER = /\p{L}/u;
   const LETTERS = /\p{L}/gu;
-  const MODEL_NEEDED = "⚠ 브라우저 내장 번역 모델이 필요합니다 · 클릭해서 받기(처음 한 번)";
+  // A classic script cannot import i18n.js; this is its t().
+  const t = (key, ...substitutions) => chrome.i18n.getMessage(key, substitutions.map(String));
+  const MODEL_NEEDED = t("modelNeeded");
 
   let settings = null;
   let enabled = false;
@@ -240,7 +242,7 @@
     if (!translators.has(key)) {
       const pending = Translator.availability(pair).then((availability) => {
         if (availability === "unavailable") {
-          throw new Error(`브라우저 내장 번역이 ${pair.sourceLanguage} → ${pair.targetLanguage}를 지원하지 않습니다.`);
+          throw new Error(t("machinePairUnsupported", pair.sourceLanguage, pair.targetLanguage));
         }
         if (availability !== "available") throw Object.assign(new Error(MODEL_NEEDED), { model: pair });
         return Translator.create(pair);
@@ -266,7 +268,7 @@
   // Resolves one { text } or { error } per input.
   async function machineTranslate(texts) {
     if (typeof Translator === "undefined") {
-      const error = new Error("이 브라우저에는 내장 번역이 없습니다(Chrome 138 이상 또는 최신 Edge 필요).");
+      const error = new Error(t("noMachineTranslator"));
       return texts.map(() => ({ error }));
     }
     const targetLanguage = machineLanguage(settings.targetLang);
@@ -313,12 +315,12 @@
         removeTranslation(record);
         record.state = "same";
       } else if (translation) {
-        render(record, "done", translation, fallback ? `브라우저 내장 번역 · AI: ${response.error}` : null);
+        render(record, "done", translation, fallback ? `${t("browserTranslator")} · AI: ${response.error}` : null);
       } else if (record.model) {
         render(record, "error", MODEL_NEEDED, `AI: ${response.error}`);
       } else {
-        const reasons = [response?.error ?? "알 수 없는 오류", fallback?.error && `내장 번역: ${fallback.error.message}`];
-        render(record, "error", "⚠ 번역 실패 · 클릭해서 다시 시도", reasons.filter(Boolean).join("\n"));
+        const reasons = [response?.error ?? t("unknownError"), fallback?.error && `${t("browserTranslator")}: ${fallback.error.message}`];
+        render(record, "error", t("translationFailed"), reasons.filter(Boolean).join("\n"));
       }
     });
   }
@@ -380,7 +382,7 @@
       candidate.model?.sourceLanguage === sourceLanguage && candidate.model?.targetLanguage === targetLanguage);
     for (const candidate of waiting) render(candidate, "loading", "");
     const progress = (loaded) => {
-      if (record.state === "loading") record.node.textContent = ` 내장 번역 모델 받는 중… ${Math.round(loaded * 100)}%`;
+      if (record.state === "loading") record.node.textContent = ` ${t("downloadingModel", Math.round(loaded * 100))}`;
     };
     progress(0);
     downloadModel(record.model, progress).catch(() => {}).finally(() => {

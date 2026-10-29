@@ -1,8 +1,10 @@
+import { localizePage, t } from "./i18n.js";
 import { bindModelPicker } from "./model-picker.js";
 import { LANGUAGES } from "./protocol.js";
 import { loadSettings } from "./settings.js";
 
 const $ = (id) => document.getElementById(id);
+localizePage();
 
 function fillLanguages(select, selected) {
   for (const [code, name] of Object.entries(LANGUAGES)) {
@@ -16,11 +18,11 @@ async function activeTab() {
 }
 
 function showToggle(enabled) {
-  $("toggle").textContent = enabled ? "원문만 보기" : "이 페이지 번역";
+  $("toggle").textContent = t(enabled ? "showOriginal" : "translatePage");
 }
 
 async function showBridgeStatus() {
-  $("bridge").textContent = "브리지 확인 중…";
+  $("bridge").textContent = t("checkingBridge");
   $("bridge").className = "status";
   const check = await chrome.runtime.sendMessage({ type: "byos:check" });
   $("bridge").textContent = `● ${check.message}`;
@@ -54,7 +56,7 @@ async function init() {
     $("pageError").hidden = true;
     const result = await chrome.runtime.sendMessage({ type: "byos:toggle-tab", tabId: tab.id });
     if (result?.error) {
-      $("pageError").textContent = `이 페이지에서는 실행할 수 없습니다: ${result.error}`;
+      $("pageError").textContent = t("cannotRunHere", result.error);
       $("pageError").hidden = false;
       return;
     }

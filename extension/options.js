@@ -1,8 +1,10 @@
+import { localizePage, t } from "./i18n.js";
 import { bindModelPicker } from "./model-picker.js";
 import { LANGUAGES } from "./protocol.js";
 import { DISPLAY_STYLES, loadSettings } from "./settings.js";
 
 const $ = (id) => document.getElementById(id);
+localizePage();
 const TEXT_FIELDS = ["targetLang", "displayStyle"];
 const NUMBER_FIELDS = ["maxSegmentsPerRequest", "maxCharsPerRequest"];
 const CHECK_FIELDS = ["machineFallback"];
@@ -23,7 +25,7 @@ async function init() {
   for (const id of CHECK_FIELDS) $(id).checked = settings[id];
 
   const check = async () => {
-    $("checkResult").textContent = "확인 중…";
+    $("checkResult").textContent = t("checking");
     $("checkResult").className = "status";
     const result = await chrome.runtime.sendMessage({ type: "byos:check" });
     $("checkResult").textContent = result.message;
@@ -35,7 +37,7 @@ async function init() {
   $("form").addEventListener("submit", async (event) => {
     event.preventDefault();
     await chrome.storage.local.set(readForm());
-    $("saved").textContent = "저장했습니다.";
+    $("saved").textContent = t("saved");
     setTimeout(() => ($("saved").textContent = ""), 2000);
   });
 }

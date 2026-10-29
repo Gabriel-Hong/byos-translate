@@ -1,9 +1,10 @@
+import { t } from "./i18n.js";
 import { PROVIDERS } from "./settings.js";
 
 const CUSTOM = "custom";
 
 // Binds the provider <select>, the model <select> and the text box shown for
-// "직접 입력" to settings, saving each change. The bridge validates model names.
+// the custom entry to settings, saving each change. The bridge validates model names.
 export function bindModelPicker({ provider, model, customModel }, settings, onSaved = () => {}) {
   for (const [id, { label }] of Object.entries(PROVIDERS)) {
     provider.add(new Option(label, id, false, id === settings.provider));
@@ -14,7 +15,7 @@ export function bindModelPicker({ provider, model, customModel }, settings, onSa
     const listed = models.some(({ value }) => value === current);
     model.replaceChildren(
       ...models.map(({ value, label }) => new Option(label, value)),
-      new Option("직접 입력…", CUSTOM),
+      new Option(t("customModel"), CUSTOM),
     );
     model.value = listed ? current : CUSTOM;
     customModel.value = listed ? "" : current;
@@ -32,7 +33,7 @@ export function bindModelPicker({ provider, model, customModel }, settings, onSa
     if (provider.value !== id || !reply?.models?.length || document.activeElement === customModel) return;
     render([
       ...models,
-      ...reply.models.map(({ id: value, label, isDefault }) => ({ value, label: isDefault ? `${label} · 기본` : label })),
+      ...reply.models.map(({ id: value, label, isDefault }) => ({ value, label: isDefault ? `${label} · ${t("modelDefault")}` : label })),
     ]);
   };
 

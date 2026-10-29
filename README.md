@@ -51,17 +51,18 @@ Optional settings (`config.json`) and the bridge log (`native-host.log`) are in 
 
 ## Use
 
-- Press **Alt+Q**, use the toolbar popup, or right-click → **BYOS Translate 켜기/끄기**. Repeat to remove the
+- Press **Alt+Q**, use the toolbar popup, or right-click → **Turn BYOS Translate on/off**. Repeat to remove the
   translations.
 - Pick the engine (Claude, OpenAI or Google), model and target language in the popup. Claude's choices always
-  point to the newest model of each family, Codex lists the models your ChatGPT plan offers, and "직접 입력…"
-  takes any other model name.
+  point to the newest model of each family, Codex lists the models your ChatGPT plan offers, and "Custom…"
+  takes any other model name. The target language starts as the browser's language when it is one of the nine
+  offered, and as English otherwise.
 - When the AI can't answer (bridge not installed, CLI missing or signed out, usage limit reached), the browser's
   built-in translator fills in: Google's model in Chrome and Microsoft's in Edge, running on your device. The first
-  time, click a block marked "모델이 필요합니다" to download the language model (English↔Korean took about 13 s in
-  Chrome 156 and about 50 s in Edge 156). Hover over a translation to see which one made it; turn the fallback off
-  in Options.
-- The UI is in Korean for now.
+  time, click a block marked "The browser's translation model is needed" to download the language model
+  (English↔Korean took about 13 s in Chrome 156 and about 50 s in Edge 156). Hover over a translation to see which
+  one made it; turn the fallback off in Options.
+- The menus follow the browser's language: Korean in a Korean browser, English in any other.
 
 ## Performance
 
